@@ -69,6 +69,11 @@ def check_package():
             assert normalize_text('这个游戏。難しいね。') == '這個遊戲。難しいね。'
             checks.append('microphone defaults OFF; local WebRTC VAD and packaged OpenCC dictionaries load; no audio capture')
             if sys.platform == 'win32':
+                from PySide6.QtMultimedia import QtAudio, QAudioSource
+                audio_probe = QAudioSource(parent=window.voice)
+                assert isinstance(audio_probe.error(), QtAudio.Error)
+                audio_probe.deleteLater()
+                checks.append('frozen QAudioSource error uses QtAudio enum; source constructed only, microphone not started')
                 import subprocess
                 runtime = runtime_folder()
                 manifest = json.loads((runtime / 'SOURCE.json').read_text(encoding='utf-8'))

@@ -102,7 +102,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.3.0",
+        "version": "0.3.1",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -120,7 +120,7 @@ def main():
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Voice-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Voice-0.3.1-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():

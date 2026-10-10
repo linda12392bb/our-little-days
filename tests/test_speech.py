@@ -10,6 +10,8 @@ import time
 import pytest
 from PySide6.QtGui import QImage, QColor
 from PySide6.QtTest import QTest
+from PySide6.QtCore import QObject, Signal, QBuffer, QIODevice, QByteArray
+from PySide6.QtMultimedia import QAudioFormat, QtAudio
 
 from our_little_days.speech import (FRAME_BYTES, PCMConverter, SpeechError, VoiceConfig, VoiceSegmenter,
     amplify, download_model, is_microphone_name, normalize_text, recognize_in_memory, rms_db, verify_model)
@@ -149,6 +151,90 @@ def voice_window(app,store):
     assert window.voice is not None
     yield window
     window.close();app.processEvents()
+
+
+@pytest.fixture
+def microphone_backend(voice_window,store,monkeypatch):
+    """Use real QtAudio enum values and synchronous signals, with no hardware."""
+    import our_little_days.speech_ui as speech_ui
+    class Device:
+        def id(self): return QByteArray(b'test-mic')
+        def description(self): return 'Microphone (USB Headset)'
+        def isFormatSupported(self,format): return False
+        def preferredFormat(self):
+            format=QAudioFormat()
+            format.setSampleRate(48000);format.setChannelCount(2)
+            format.setSampleFormat(QAudioFormat.SampleFormat.Float)
+            return format
+    class Source(QObject):
+        stateChanged=Signal(object)
+        initial_error=QtAudio.Error.NoError
+        initial_exception=None
+        def __init__(self,device,format,parent):
+            super().__init__(parent)
+            self.audio_format=format
+            self.input=QBuffer(self)
+            self.input.open(QIODevice.OpenModeFlag.ReadOnly)
+            self.stopped=False
+        def setBufferSize(self,size): self.buffer_size=size
+        def error(self): return self.initial_error
+        def start(self):
+            if self.initial_exception:
+                raise self.initial_exception
+            self.stateChanged.emit(QtAudio.State.ActiveState if self.error()==QtAudio.Error.NoError else QtAudio.State.StoppedState)
+            return self.input
+        def stop(self): self.stopped=True
+    w=voice_window
+    w.voice_device.clear();w.voice_device.addItem('Microphone (USB Headset)',Device())
+    model=store.path.parent/'speech-models/ggml-base.bin'
+    model.parent.mkdir();model.write_bytes(b'placeholder; startup does not run ASR')
+    monkeypatch.setattr(speech_ui,'QAudioSource',Source)
+    monkeypatch.setattr(speech_ui.sys,'platform','win32')
+    return w,Source
+
+
+def test_microphone_start_accepts_actual_qt_audio_no_error_and_native_format(microphone_backend,store):
+    w,Source=microphone_backend
+    w.voice.start()
+    assert w.voice.source is not None
+    assert w.voice.source.error()==QtAudio.Error.NoError
+    assert w.voice.source.audio_format.sampleRate()==48000
+    assert w.voice.converter.kind=='float' and w.voice.converter.channels==2
+    assert '麥克風開啟' in w.voice_status.text()
+    assert w.voice_toggle.text()=='關閉麥克風'
+    assert w.ai.ledger.totals()['month']['requests']==0
+    source=w.voice.source
+    w.voice.stop()
+    assert source.stopped and w.voice.source is None
+
+
+def test_synchronous_open_error_does_not_dereference_stopped_source(microphone_backend):
+    w,Source=microphone_backend
+    Source.initial_error=QtAudio.Error.OpenError
+    w.voice.start()
+    assert w.voice.source is None and w.voice.input is None
+    assert 'OpenError' in w.voice_note.text()
+    assert 'AttributeError' not in w.voice_note.text()
+    assert not w.voice.send_timer.isActive()
+
+
+def test_later_hardware_error_stops_capture_and_reports_error_code(microphone_backend):
+    w,Source=microphone_backend
+    w.voice.start()
+    source=w.voice.source
+    assert source is not None
+    source.initial_error=QtAudio.Error.IOError
+    source.stateChanged.emit(QtAudio.State.StoppedState)
+    assert source.stopped and w.voice.source is None
+    assert 'IOError' in w.voice_note.text()
+
+
+def test_start_exception_has_specific_diagnostic_and_leaves_mic_off(microphone_backend):
+    w,Source=microphone_backend
+    Source.initial_exception=TypeError('mock unsupported invocation')
+    w.voice.start()
+    assert w.voice.source is None
+    assert 'TypeError' in w.voice_note.text()
 
 
 def test_mic_defaults_off_no_audio_or_ai_and_settings_restore(voice_window,store,app):

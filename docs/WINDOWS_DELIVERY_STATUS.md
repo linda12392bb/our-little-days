@@ -1,5 +1,16 @@
 # Windows 試用包交付與驗證
 
+## 麥克風啟動修正 0.3.1
+
+- 下載：[Windows 語音 0.3.1](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Voice-0.3.1-preview.zip)。原 0.3.0 ZIP 保留供查核，建議改用修正版。
+- 大小：58,820,491 bytes；SHA-256：`47f9ce21aff30cf45c49a1831b5dc7e1c4930a81eff191400d92f73a3c98e650`。
+- EXE SHA-256：`52414b72f4e7532000c3e86624b1920d5e7dde67320c05a1f60e927a8611a9d0`。
+- 原因：PySide6 6.10.2 的 QAudioSource.error() 回傳 QtAudio.Error；0.3.0 用 QAudio.Error 比對，即使兩者都是 NoError（值 0）仍不相等。同步 stateChanged 因此停止正常音源，之後存取已清空 source 又產生 AttributeError，顯示泛用「麥克風啟動失敗」。
+- 修正一致使用 QtAudio.Error、處理同步停止後的返回、安全斷開收音訊號，並保留 OpenError／IOError／例外類型診斷。
+- 回歸測試涵蓋真正 QtAudio 列舉、同步成功／失敗、48 kHz 雙聲道 Float 格式、後續中斷與啟動例外；模擬裝置，沒有開真實麥克風。113 passed，2 Windows-only skipped。
+- Windows EXE 離線封裝、QtAudio 回傳型別、Whisper CLI 與原十三人格校驗通過（Linux + Wine）；真實 YETI X 收音及辨識仍待驗收。使用者已回報 YETI X 在 Windows 輸入測試有聲音。
+- 更新到新資料夾，沿用 %LOCALAPPDATA%\OurLittleDays；不重下載模型，不重設人格／聊天／記憶／金鑰／預算。
+
 ## 自動語音輸入 0.3.0
 
 - 檔名：`OurLittleDays-Windows-x64-Voice-preview.zip`

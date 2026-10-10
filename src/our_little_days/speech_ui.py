@@ -5,7 +5,7 @@ import sys
 from collections import deque
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
-from PySide6.QtMultimedia import QAudio, QAudioFormat, QAudioSource, QMediaDevices
+from PySide6.QtMultimedia import QtAudio, QAudioFormat, QAudioSource, QMediaDevices
 from PySide6.QtWidgets import QFileDialog
 
 from .models import taipei_now
@@ -168,20 +168,26 @@ class VoiceController(QObject):
             self.source.setBufferSize(max(4096, format.bytesForDuration(250000)))
             self.source.stateChanged.connect(self.state_changed)
             self.input = self.source.start()
-            if self.input is None or self.source.error() != QAudio.Error.NoError:
-                raise SpeechError('麥克風無法開啟；請檢查 Windows 麥克風隱私權與裝置。')
+            # start() can synchronously emit an error and state_changed() may stop it.
+            if self.source is None:
+                self.input = None
+                return
+            if self.input is None or self.source.error() != QtAudio.Error.NoError:
+                error = self.source.error().name
+                raise SpeechError(f'麥克風無法開啟（{error}）；請檢查 Windows 麥克風隱私權與裝置。')
             self.input.readyRead.connect(self.receive_audio)
             self.window.voice_status.setText('● 麥克風開啟 · 本機自動偵測')
             self.window.voice_note.setText('安靜時只執行本機 VAD；請戴耳機避免喇叭聲進入麥克風。')
             self.refresh()
         except Exception as exc:
             self.stop()
-            self.window.voice_note.setText(str(exc) if isinstance(exc, SpeechError) else '麥克風啟動失敗，不會改收系統聲音。')
+            self.window.voice_note.setText(str(exc) if isinstance(exc, SpeechError) else f'麥克風啟動失敗（{type(exc).__name__}）；請回報此錯誤代碼。')
 
     def state_changed(self, state):
-        if self.source and self.source.error() != QAudio.Error.NoError:
+        if self.source and self.source.error() != QtAudio.Error.NoError:
+            error = self.source.error().name
             self.stop()
-            self.window.voice_note.setText('麥克風中斷或權限不足，已停止收音。')
+            self.window.voice_note.setText(f'麥克風中斷或無法開啟（{error}），已停止收音；請檢查 Windows 麥克風權限與輸入裝置。')
 
     def receive_audio(self):
         if not self.source or not self.input:
@@ -338,7 +344,10 @@ class VoiceController(QObject):
         if self.source:
             self.source.blockSignals(True)
             if self.input:
-                self.input.readyRead.disconnect(self.receive_audio)
+                try:
+                    self.input.readyRead.disconnect(self.receive_audio)
+                except (RuntimeError, TypeError):
+                    pass
             self.source.stop()
             self.source.deleteLater()
         self.source = self.input = self.segmenter = self.converter = None
