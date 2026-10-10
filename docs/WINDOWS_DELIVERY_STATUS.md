@@ -1,5 +1,17 @@
 # Windows 試用包交付與驗證
 
+## 聖護稱呼、愛意與互動界線 0.4.4
+
+- 下載：[Windows 自主陪伴 0.4.4](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.4-preview.zip)，私人 GitHub 檔案頁按 View raw。原九個 ZIP 保留。
+- 大小：59,098,912 bytes；SHA-256：`b3eeb69344729b18cdbfa8d9e8dc6f844e37607613dbd11a4aab446272a6e9e1`；EXE SHA-256：`9c8462991932fb909cd276f7c3ba91f2e682d5e4af3680d5d651a3c1646a050f`。
+- 使用者確認 0.4.3 一般聊天能回覆；截圖中聖護混用 REO 的「小鳥ちゃん」與全敬語風格。稱呼原始檔未遺失，問題出在模型角色語氣混用。使用者後續正式確認聖護平常稱呼「月」、喜歡主動表達愛意、喜歡看使用者各種反應，但真的表現不喜歡時會停。僅更新 shogo 的 user_address 與三條 behavior，所有 source_text、原人格核心、外貌、语言、世界線關係未改，其餘十二份檔案位元組不變。
+- 舊 SQLite 一次性更新前自動安全備份，保留所有既有人格與自訂欄位、聊天、記憶與 AU；已套用標記後不在重開覆蓋後續自訂。完整性基準的原始快照不改，僅登記本次已確認欄位。
+- 完整十三人格仍送出，各角色稱呼對照以保存設定生成，不繼承前一位的敬語／愛稱；結構化最新確認優先於保留原文的較早欄位。舊錯誤聊天原文仍保存，但不作新設定。沒有字串封鎖整批、改寫生成文字或自動重試。
+- 截圖中一般文字回覆聲稱看見畫面，但該功能原先不自動附圖。現在明確標示本次是否真的附圖及範圍；沒有圖時不能宣稱正在看到畫面，歷史畫面事件不能當成目前證據。不新增圖片或 API 請求；既有語音附圖、單次畫面分析與畫面事件功能保留。
+- **160 passed、2 Windows-only skipped**，人格完整性稽核、Qt smoke、依賴檢查通過。新增舊 SQLite 更新／備份／只改兩欄／一次性套用／保留後續自訂，各稱呼與完整來源不被歷史錯誤覆蓋，五類實際附圖與歷史觀察證據測試。
+- Windows frozen EXE Linux + Wine 封裝檢查通過，實測一次性舊資料更新後與新角色檔一致、備份存在、完整原文／AU 保留；送出按鈕的模擬 API 含聖護「月」、REO「小鳥ちゃん」對照及未附圖證據。原 SQLite／DPAPI／官方二進位與公開 tiny 語音檢查通過。**本次 0.4.4 正式模型口吻與真正 Windows 實機仍待觀察**。
+- 更新完整解壓後勾文字 AI 即可；不用重做已成功的兩項成本測試、不重輸 Key 或模型。所有費用／預算／自訂冷卻沿用，沒有付款或加值操作。
+
 ## 輸入後停用／跨批對象配對修正 0.4.3
 
 - 下載：[Windows 自主陪伴 0.4.3](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.3-preview.zip)，私人 GitHub 檔案頁按 View raw。原八個 ZIP 均保留。

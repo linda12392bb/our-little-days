@@ -39,6 +39,7 @@ def main():
             raise StorageError("這個資料目錄已有永久角色設定；不會自動覆寫。自訂 JSON 僅能用於新資料目錄；請先備份並用 --data-dir 選擇新的目錄。")
         store.seed(characters, load_apartment_settings())
         store.apply_confirmed_order_speech_update()
+        store.apply_confirmed_shogo_address_update()
         characters = store.load_characters()
     except (OSError, ValueError, TypeError, KeyError, StorageError, sqlite3.DatabaseError) as exc:
         if store:

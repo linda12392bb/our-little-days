@@ -1,5 +1,5 @@
 """Isolated package verification; never opens the user's apartment or captures a screen."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import hashlib
 import json
 import multiprocessing
@@ -51,6 +51,9 @@ def _check_manual_buttons(window):
         if kind == 'user_reply':
             assert schema['minItems'] == 1 and item['properties']['reply_to_message_id'] == {'type':'null'}
             assert context['current_user_input'] == {'kind':'typed_text','text':'晚安','saved':True}
+            assert context['character_address_rules']['shogo'] == '月'
+            assert context['character_address_rules']['reo'] == '小鳥ちゃん'
+            assert context['visual_evidence']['image_attached'] is False
         for variant in variants[1:]:
             props = variant['properties']
             authors = props['recipient_ids']['items']['enum']
@@ -153,6 +156,13 @@ def check_package(speech_test_dir=None):
         window = None
         try:
             store.seed(characters, load_apartment_settings())
+            shogo = next(c for c in characters if c.id == 'shogo')
+            legacy = replace(shogo, user_address='かみそりちゃん', behavior=tuple(shogo.behavior[:-3]))
+            store.save_character(legacy)
+            assert store.apply_confirmed_shogo_address_update().is_file()
+            assert store.apply_confirmed_shogo_address_update() is None
+            assert json.loads(json.dumps({c.id:asdict(c) for c in store.load_characters()})) == original
+            checks.append('confirmed Shogo 月 address, proactive affection and stopping unwanted interaction migrate once with backup; original source, personality and AU preserved')
             window = MainWindow(DemoBackend(), store.load_characters(), store)
             window.show()
             app.processEvents()

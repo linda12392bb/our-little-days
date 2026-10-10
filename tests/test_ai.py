@@ -634,3 +634,36 @@ def test_typing_while_quiet_enabled_pins_current_input_during_inflight_request(a
         release.set()
         window.close()
         app.processEvents()
+
+
+def test_each_saved_address_and_voice_style_remains_independent_of_past_errors(store):
+    profiles = store.load_characters()
+    before = [asdict(c) for c in profiles]
+    store.append_message(speaker_id='shogo', speaker_name='聖護', text='はい、小鳥ちゃん、確かに見えております。', source_kind='ai')
+    payload, _ = build_payload(AIConfig(), profiles, store, 'main', 'user_reply', current_input={'kind':'typed_text','text':'晚安','saved':True})
+    context = json.loads(payload['messages'][1]['content'][0]['text'])
+    assert context['character_address_rules'] == {c.id:c.user_address for c in profiles if c.user_address}
+    assert context['character_address_rules']['shogo'] == '月'
+    assert context['character_address_rules']['reo'] == '小鳥ちゃん'
+    assert 'light' not in context['character_address_rules']  # No invented nickname.
+    instructions = payload['messages'][0]['content']
+    assert '不隨前一位角色繼承' in instructions and '不沿用這些錯誤' in instructions
+    assert '聖護使用自然日文，不套用 REO' in instructions
+    assert 'はい、小鳥ちゃん' in context['recent_chat'][0]['text']  # History retained verbatim.
+    assert context['characters'] == json.loads(json.dumps(before))
+    assert [asdict(c) for c in store.load_characters()] == before
+
+
+@pytest.mark.parametrize('kind,with_image', [('user_reply',False), ('user_reply',True), ('reply_test',False), ('quiet_chat',False), ('screen_event',True)])
+def test_visual_evidence_describes_actual_payload_not_historical_observations(store, app, kind, with_image):
+    store.add_event('過去看見遊戲選單', importance='screen_observation')
+    payload, _ = build_payload(AIConfig(), store.load_characters(), store, 'main', kind,
+                              image=image() if with_image else None, selected='shogo' if kind=='reply_test' else None)
+    context = json.loads(payload['messages'][1]['content'][0]['text'])
+    assert context['visual_evidence'] == {'image_attached':with_image, 'scope':'one_selected_window_image' if with_image else 'no_current_image'}
+    actual_images = [part for part in payload['messages'][1]['content'] if part['type']=='image_url']
+    assert bool(actual_images) == with_image
+    instructions = payload['messages'][0]['content']
+    assert ('確實附有一張指定視窗圖片' if with_image else '沒有附上圖片；不得聲稱看見目前畫面') in instructions
+    assert '不能當成現在畫面的證據' in instructions
+    assert context['recent_screen_events'][0]['summary']=='過去看見遊戲選單'

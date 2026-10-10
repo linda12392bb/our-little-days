@@ -191,3 +191,34 @@ def test_confirmed_order_supplement_preserves_other_fields_and_custom_tone(store
         assert asdict(after['order'])[key] == asdict(old)[key]
     assert all(after[key] == before[key] for key in before if key != 'order')
     assert store.apply_confirmed_order_speech_update() is None
+
+
+def test_confirmed_shogo_update_migrates_existing_data_once_without_losing_personality(store):
+    from dataclasses import replace, asdict
+    profiles = store.load_characters()
+    old = next(c for c in profiles if c.id=='shogo')
+    original_behavior = tuple(b for b in old.behavior if b not in ('平常稱呼使用者為「月」。', '喜歡主動表達愛意；維持原作人格與獨立思考，依各世界線已確認關係互動，不以愛意擅自推進或改寫關係狀態。', '喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。'))
+    legacy = replace(old, user_address='かみそりちゃん', behavior=(*original_behavior,'自訂既有行為'))
+    store.save_character(legacy)
+    store.append_message(speaker_id='shogo', speaker_name='聖護', text='小鳥ちゃん', source_kind='ai')
+    store.add_memory('正式約會記憶', character_id='shogo')
+    before_messages, before_memories = store.messages(), store.memories()
+    safety = store.apply_confirmed_shogo_address_update()
+    assert safety and safety.is_file()
+    updated = next(c for c in store.load_characters() if c.id=='shogo')
+    a,b = asdict(legacy),asdict(updated)
+    assert {key for key in a if a[key]!=b[key]} == {'user_address','behavior'}
+    assert updated.user_address=='月' and '自訂既有行為' in updated.behavior
+    assert any('喜歡主動表達愛意' in b for b in updated.behavior)
+    assert updated.behavior[-1]=='喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。'
+    assert updated.source_text==legacy.source_text and updated.relationships==legacy.relationships
+    assert [c for c in store.load_characters() if c.id!='shogo']==[c for c in profiles if c.id!='shogo']
+    assert store.messages()==before_messages and store.memories()==before_memories
+    backup = SQLiteStore(safety)
+    try:
+        assert next(c for c in backup.load_characters() if c.id=='shogo').user_address=='かみそりちゃん'
+    finally:
+        backup.close()
+    store.save_character(replace(updated, user_address='使用者後續自訂'))
+    assert store.apply_confirmed_shogo_address_update() is None
+    assert next(c for c in store.load_characters() if c.id=='shogo').user_address=='使用者後續自訂'

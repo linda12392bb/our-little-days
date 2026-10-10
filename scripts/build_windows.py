@@ -107,7 +107,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.4.3",
+        "version": "0.4.4",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -119,13 +119,13 @@ def main():
         "whisper_runtime": speech_manifest,
         "windows_manual_acceptance": "not_run",
         "signing": "unsigned",
-        "scope": "Typed and voice replies use pinned local input IDs and null model references; historical reply IDs coupled with their true recipients in schema branches. Frozen send-button test keeps text and quiet AI enabled. Existing constrained character IDs and billed failure dialogs. Existing quiet peer continuity, offline microphone, full personas and all-request shared monthly budget retained. Native Windows live-response acceptance pending.",
+        "scope": "Confirmed Shogo address 月 and proactive affection applied once with backup, preserving source/personality/AU. Per-speaker address and register isolation, explicit actual image evidence, historical errors not treated as persona changes. Existing input pinning, peer continuity, offline voice and all-request budget retained; native live API quality pending.",
     }
     (folder / "BUILD_INFO.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.3-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.4-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():

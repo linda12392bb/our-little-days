@@ -169,6 +169,31 @@ class SQLiteStore:
             if count != 1:
                 raise StorageError("角色不存在。")
 
+    def apply_confirmed_shogo_address_update(self):
+        """One approved update; preserve original text, custom traits and all AU relations."""
+        marker = 'confirmed:shogo-address-affection-2026-10-11'
+        if self.connection.execute('SELECT 1 FROM settings WHERE key=?', (marker,)).fetchone():
+            return None
+        shogo = next(c for c in self.load_characters() if c.id == 'shogo')
+        behavior = list(shogo.behavior)
+        for addition in ('平常稱呼使用者為「月」。',
+                         '喜歡主動表達愛意；維持原作人格與獨立思考，依各世界線已確認關係互動，不以愛意擅自推進或改寫關係狀態。',
+                         '喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。'):
+            if addition not in behavior:
+                behavior.append(addition)
+        changed = shogo.user_address != '月' or behavior != list(shogo.behavior)
+        safety = None
+        if changed:
+            safety = self.path.parent / 'backups' / f'before-shogo-address-{taipei_now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.sqlite3'
+            self.backup(safety)
+        with self.connection:
+            if changed:
+                updated = replace(shogo, user_address='月', behavior=tuple(behavior))
+                self.connection.execute('UPDATE characters SET profile_json=?,updated_at=? WHERE id=?',
+                                        (encode(asdict(updated)), taipei_now().isoformat(), 'shogo'))
+            self.connection.execute('INSERT INTO settings VALUES(?,?)', (marker, encode({'user_address':'月','proactive_affection':True})))
+        return safety
+
     def set_relationship(self, character_id, worldline, relation, *, confirmed=False):
         if not confirmed:
             raise StorageError("修改角色關係需要使用者確認。")
