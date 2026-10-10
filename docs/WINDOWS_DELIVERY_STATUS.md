@@ -1,5 +1,17 @@
 # Windows 試用包交付與驗證
 
+## 同批接話修正 0.4.2
+
+- 下載：[Windows 自主陪伴 0.4.2](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.2-preview.zip)，登入私人 GitHub，按 View raw。原七個 ZIP 保留。
+- 大小：59,091,340 bytes；SHA-256：`36c91735bc7ee8cb0105d008334ea6d258c91cd2783266ee07118c36d84ea2f0`。
+- EXE SHA-256：`b59a7e2f080ef5b883d97f9961eadb48d0b4b1de8992f91d42f769c9459ddf7a`。
+- 使用者確認 0.4.1 畫面與所選角色兩項成本測試成功；安靜群聊顯示「第 1 則訊息的同批接話參照無效」，15759 輸入／346 輸出，估算 NT$0.2263。原因是原 schema 允許任意整數同批索引，第一則沒有可引用的較早訊息，本機正確拒絕不合法參照，導致群聊無法顯示且 AI 停用。
+- 新版所有群聊 API 輸出固定 reply_to_index=null，模型只指定 recipient_ids。同批較早且符合明確收話對象的最近一則由本機建立 reply_to；第一則向尚未發言角色開話題不建立虛構連結。跨批 reply_to_message_id 仍採同世界線實際 ID 且優先，不猜測其他批次或 AU，不改寫任何發言、翻譯、人格或關係。舊版合法索引仍可讀取；不合法索引仍拒絕，整批原子回滾。
+- 安靜開關代表使用者允許空閒自主群聊；每次啟動後勾選即可保持開啟，使用者不用自行判斷是否安靜，也不用說話前關閉。公寓輸入、語音／待處理回覆、事件優先、三分鐘本機檢查、既有冷卻／去重／預算不變。AI 錯誤停用後仍需手動重新啟用，不偷偷恢復付費工作。
+- 已成功的畫面／角色成本測試標記、SQLite、原模型、Key、NT$500 月額與使用者自訂冷卻／每日額度保留；先前失敗費用照常計入，不重試、不退款、不重置預算、不付款或加值。升級後只需手動啟用文字 AI，再做一次安靜群聊測試，成功後啟用安靜排程。
+- 全套 **150 passed、2 Windows-only skipped**，十三人格原文稽核、Qt UI smoke、依賴檢查通過。新增所有群聊請求的 null 格式、四則同批接話與最近符合對象、SQLite 重開、開場不誤連舊訊息、跨批明確 ID 優先、五類非法第一則索引原子拒絕，原預算／世界線／長期記憶測試保留。
+- Windows frozen EXE 在 Linux+Wine 直接點擊安靜測試按鈕，以單次模擬 API 產生光→序→REO 的接話並保存正確 reply_to；以截圖相同 token 驗證估算 NT$0.2263、成功視窗與排程預設 OFF。原 DPAPI、SQLite 備份／重開、原生官方二進位來源與公開 tiny 語音參考亦通過。**未執行 0.4.2 Windows 實機或付費正式模型驗收**。
+
 ## 單次 AI 角色測試格式與失敗提示 0.4.1
 
 - 下載：[Windows 自主陪伴 0.4.1](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.1-preview.zip)，登入私人 GitHub，按 View raw。原六個 ZIP 完整保留。

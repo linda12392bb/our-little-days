@@ -22,7 +22,7 @@ def conversation():
     return {'meaningful': False, 'event_key': '', 'summary': '', 'important': False, 'messages': [
         {'speaker_id': 'order', 'recipient_ids': ['rixo'], 'reply_to_index': None,
          'segments': [{'kind': 'speech', 'text': 'ほんま、気になるんやろ♡', 'translation': '其實，你很在意吧♡'}]},
-        {'speaker_id': 'rixo', 'recipient_ids': ['order'], 'reply_to_index': 0,
+        {'speaker_id': 'rixo', 'recipient_ids': ['order'], 'reply_to_index': None,
          'segments': [{'kind': 'speech', 'text': 'うるせえ。俺に聞くな。', 'translation': '吵死了。別問我。'}]},
     ]}
 
@@ -263,6 +263,70 @@ def test_atomic_quiet_daily_reservations_share_month_budget_across_connections(t
 
 def result(value):
     return {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(value)}}]}
+
+
+@pytest.mark.parametrize('kind', ['quiet_test', 'quiet_chat', 'user_reply', 'screen_event'])
+def test_group_schema_never_asks_model_for_same_batch_indexes(store, kind, app):
+    image = QImage(64, 64, QImage.Format.Format_RGB32) if kind == 'screen_event' else None
+    payload, _ = build_payload(AIConfig(), store.load_characters(), store, 'main', kind, image=image)
+    fields = payload['response_format']['json_schema']['schema']['properties']['messages']['items']['properties']
+    assert fields['reply_to_index'] == {'type': 'null'}
+    assert 'reply_to_index 固定 null' in payload['messages'][0]['content']
+
+
+def test_local_peer_links_follow_explicit_recipients_and_survive_reopen(store):
+    profiles = store.load_characters()
+    old = store.append_message(speaker_id='order', speaker_name='序', text='本批以前的訊息')
+    foreign = store.append_message(speaker_id='order', speaker_name='序', text='其他世界線', worldline='glasshouse')
+    value = conversation()
+    value['messages'] = [
+        {'speaker_id':'light','recipient_ids':['order'],'reply_to_index':None,'reply_to_message_id':None,
+         'segments':[{'kind':'speech','text':'序，換你接話。','translation':''}]},
+        {'speaker_id':'order','recipient_ids':['light'],'reply_to_index':None,'reply_to_message_id':None,
+         'segments':[{'kind':'speech','text':'ほんま、そうなんや♡','translation':'真的，是這樣啊♡'}]},
+        {'speaker_id':'light','recipient_ids':['order'],'reply_to_index':None,'reply_to_message_id':None,
+         'segments':[{'kind':'speech','text':'我聽著呢。','translation':''}]},
+        {'speaker_id':'reo','recipient_ids':['light'],'reply_to_index':None,'reply_to_message_id':None,
+         'segments':[{'kind':'speech','text':'僕も伺っております。','translation':'我也正在聽。'}]},
+    ]
+    before = json.loads(json.dumps(value))
+    validated = validate_turn(result(value), profiles, 'quiet_test', store=store)
+    records = save_turn(store, 'main', validated, profiles, 'quiet_test')
+    assert value == before  # No generated words or recipients rewritten.
+    assert records[0]['reply_to'] is None  # Opening addresses a future speaker, not an old message.
+    assert records[1]['reply_to'] == records[0]['id']
+    assert records[2]['reply_to'] == records[1]['id']
+    assert records[3]['reply_to'] == records[2]['id']  # Latest matching light message, not first.
+    assert old['id'] not in {r['reply_to'] for r in records} and foreign['id'] not in {r['reply_to'] for r in records}
+    state = store.conversation_state()
+    second = SQLiteStore(store.path)
+    try:
+        assert second.messages('main')[-4:] == records and second.conversation_state() == state
+        assert second.messages('glasshouse') == [foreign] and second.load_characters() == profiles
+    finally:
+        second.close()
+
+
+def test_explicit_cross_batch_reference_has_priority_over_local_recipient_matching(store):
+    profiles = store.load_characters()
+    original = store.append_message(speaker_id='order',speaker_name='序',text='先前真正說过的話')
+    value = conversation()
+    value['messages'][1]['reply_to_message_id'] = original['id']
+    records = save_turn(store, 'main', validate_turn(result(value), profiles, 'quiet_chat', store=store), profiles, 'quiet_chat')
+    assert records[1]['reply_to'] == original['id'] and records[1]['reply_to'] != records[0]['id']
+
+
+@pytest.mark.parametrize('invalid_index', [0, 1, -1, True, '0'])
+def test_invalid_first_same_batch_reference_still_rejected_atomically(store, invalid_index):
+    profiles = store.load_characters()
+    bad = conversation()
+    bad['messages'][0]['reply_to_index'] = invalid_index
+    with pytest.raises(AIError, match='同批接話參照無效'):
+        validate_turn(result(bad), profiles, 'quiet_test', store=store)
+    with pytest.raises(AIError, match='同批接話參照無效'):
+        save_turn(store, 'main', bad, profiles, 'quiet_test')
+    assert not store.messages() and not store.conversation_state()
+    assert store.load_characters() == profiles
 
 
 def test_cross_batch_reply_remembers_old_quotes_beyond_recent_chat_and_is_world_scoped(store):

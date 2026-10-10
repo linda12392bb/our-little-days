@@ -39,14 +39,28 @@ def _check_manual_buttons(window):
     calls, warnings, successes = [], [], []
     def fake(key, payload, cancelled):
         calls.append(payload)
+        kind = json.loads(payload['messages'][1]['content'][0]['text'])['task']
         schema = payload['response_format']['json_schema']['schema']['properties']['messages']
-        assert schema['items']['properties']['speaker_id']['enum'] == ['order']
-        assert schema['minItems'] == schema['maxItems'] == 1
+        assert schema['items']['properties']['reply_to_index'] == {'type':'null'}
+        if kind == 'reply_test':
+            assert schema['items']['properties']['speaker_id']['enum'] == ['order']
+            assert schema['minItems'] == schema['maxItems'] == 1
         value = {'meaningful': True, 'event_key': '', 'summary': '', 'important': False,
                  'messages':[{'speaker_id':'序' if len(calls) == 1 else 'order',
                               'recipient_ids':['user'], 'reply_to_index':None, 'reply_to_message_id':None,
                               'segments':[{'kind':'speech', 'text':'表示テストやで♡', 'translation':'這是顯示測試喔♡'}]}]}
-        return {'id':'offline-test-only', 'usage':{'prompt_tokens':15054, 'completion_tokens':161},
+        if kind == 'quiet_test':
+            value['meaningful'] = False
+            value['messages'] = [
+                {'speaker_id':'light','recipient_ids':['order'],'reply_to_index':None,'reply_to_message_id':None,
+                 'segments':[{'kind':'speech','text':'本機接話測試。','translation':''}]},
+                {'speaker_id':'order','recipient_ids':['light'],'reply_to_index':None,'reply_to_message_id':None,
+                 'segments':[{'kind':'speech','text':'表示テストやで♡','translation':'這是顯示測試喔♡'}]},
+                {'speaker_id':'reo','recipient_ids':['order'],'reply_to_index':None,'reply_to_message_id':None,
+                 'segments':[{'kind':'speech','text':'僕も参加いたします。','translation':'我也來參與。'}]},
+            ]
+        usage = {'prompt_tokens':15759, 'completion_tokens':346} if kind == 'quiet_test' else {'prompt_tokens':15054, 'completion_tokens':161}
+        return {'id':'offline-test-only', 'usage':usage,
                 'choices':[{'finish_reason':'stop', 'message':{'content':json.dumps(value)}}]}
     try:
         ai_ui.request_api = fake
@@ -71,6 +85,20 @@ def _check_manual_buttons(window):
         assert len(successes) == 1 and len(window.store.messages()) == len(before)+1
         assert c.ledger.totals()['month']['requests'] == 2
         assert c.ledger.totals()['month']['uncertain_twd'] == 0
+        rid, _ = c.ledger.reserve(c.config, 'screen_test', 100)
+        c.ledger.settle(rid, {'prompt_tokens':100,'completion_tokens':100}, 'offline-cost-gate-only')
+        c.ledger.mark_test(c.config, 'screen_test', rid)
+        c.enable(True)
+        assert window.ai_quiet_test.isEnabled() and not c.quiet_enabled
+        QTest.mouseClick(window.ai_quiet_test, Qt.MouseButton.LeftButton)
+        deadline = time.monotonic()+10
+        while c.worker is not None and time.monotonic() < deadline:
+            QTest.qWait(10)
+        assert c.worker is None and len(calls) == 3 and len(successes) == 2 and len(warnings) == 1
+        records = window.store.messages()[-3:]
+        assert records[0]['reply_to'] is None and records[1]['reply_to'] == records[0]['id']
+        assert records[2]['reply_to'] == records[1]['id']
+        assert abs(c.ledger.quiet_today()-.226288) < 1e-9 and not c.quiet_enabled
     finally:
         (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
          c.keys.read, c.keys.exists, c.config) = saved
@@ -163,6 +191,7 @@ def check_package(speech_test_dir=None):
             assert not store.conversation_context('glasshouse')['anchor_messages']
             _check_manual_buttons(window)
             checks.append('frozen manual reply button works while AI paused; strict selected ID schema, safe failure dialog with settled usage and success dialog verified with mock provider, no network or retry')
+            checks.append('frozen quiet_test button creates light-to-order-to-reo peer replies in one mock request; null model indexes resolved locally to prior explicit recipients and persisted; scheduler remains OFF')
             continuity = store.conversation_state('main')
             messages = store.messages()
             checks.append('quiet chat defaults OFF; 3-minute local check, 2000 shared output cap, NT$10 daily cap and persistent cross-batch peer replies verified with synthetic data, no API')
