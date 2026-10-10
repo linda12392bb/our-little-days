@@ -184,11 +184,23 @@ class SQLiteStore:
     def messages(self, worldline="main"):
         return [dict(row) for row in self.connection.execute("SELECT * FROM messages WHERE worldline_id=? ORDER BY id", (worldline,))]
 
+    def conversation_state(self, worldline="main"):
+        row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('conversation:'+worldline,)).fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def conversation_context(self, worldline="main"):
+        state = self.conversation_state(worldline)
+        # Original quotes and IDs survive long chat histories; no invented summary.
+        anchors = state.get('anchor_ids', [])
+        messages = [dict(row) for row in self.connection.execute('SELECT * FROM messages WHERE worldline_id=? ORDER BY id', (worldline,)) if row['id'] in anchors]
+        return {'state': state, 'anchor_messages': messages}
+
     def clear_messages(self, worldline, *, confirmed=False):
         if not confirmed:
             raise StorageError("刪除聊天紀錄需要使用者確認。")
         with self.connection:
             self.connection.execute("DELETE FROM messages WHERE worldline_id=?", (worldline,))
+            self.connection.execute('DELETE FROM settings WHERE key=?', ('conversation:'+worldline,))
 
     def add_event(self, summary, worldline="main", evidence=None, importance="important"):
         if not summary.strip():

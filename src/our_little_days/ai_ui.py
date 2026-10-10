@@ -3,14 +3,17 @@ from dataclasses import replace
 from collections import deque
 import json
 import uuid
+import time
+import math
 
 from PySide6.QtCore import QObject, QThread, Signal, QTimer
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
-    QFormLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout)
+    QFormLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QScrollArea, QWidget)
 
-from .ai_cost import AIConfig, AIError, UsageLedger
+from .ai_cost import AIConfig, AIError, QuietBudgetExhausted, UsageLedger
 from .ai_engine import ChangeGate, build_payload, save_turn, validate_turn
 from .ai_provider import WindowsKeyStore, request_api
+from .models import taipei_now
 
 
 class AITask(QThread):
@@ -50,6 +53,52 @@ class AIController(QObject):
         self.last_note = 'AI 關閉 · 不會呼叫 API'
         self.failed_request = False
         self.closed = False
+        self.quiet_enabled = False
+        self.clock = time.monotonic
+        self.last_activity = self.clock()
+        self.quiet_blocked_day = None
+        self.quiet_timer = QTimer(self)
+        self.quiet_timer.setInterval(180000)
+        self.quiet_timer.timeout.connect(self.quiet_tick)
+        self.quiet_timer.start()
+        window.chat_input.textChanged.connect(self.activity)
+
+    def activity(self):
+        self.last_activity = self.clock()
+
+    def quiet(self, checked):
+        self.quiet_enabled = bool(checked and self.enabled and self.ledger.tests_passed(self.config))
+        self.activity()
+        self.quiet_blocked_day = None
+        if not self.quiet_enabled and self.worker and self.kind == 'quiet_chat':
+            self.generation += 1
+            self.worker.requestInterruption()
+        self.last_note = '安靜聊天已啟用 · 不需擷取畫面，依設定間隔與額度開話題' if self.quiet_enabled else '安靜聊天已關閉 · 文字／語音回覆可繼續'
+        self.refresh()
+
+    def quiet_tick(self):
+        if self.closed or not self.enabled or not self.quiet_enabled:
+            return False
+        voice = self.window.voice
+        if self.worker or self.pending_user or self.voice_inputs or self.window.chat_input.toPlainText().strip() or (voice and (voice.worker or voice.pending_text is not None or (voice.segmenter and voice.segmenter.speaking))):
+            self.activity()
+            return False
+        if self.quiet_blocked_day == taipei_now().isoformat()[:10]:
+            return False
+        if self.clock() - self.last_activity < self.config.quiet_interval_minutes * 60:
+            self.refresh()
+            return False
+        state = self.window.store.conversation_state(self.window.worldline)
+        until = state.get('next_quiet_at')
+        if until and taipei_now().isoformat() < until:
+            return False
+        # A pending stable screen event takes priority over an idle conversation.
+        if self.autonomous and self.window.frame_image is not None:
+            if self.gate.ready(self.window.frame_image, self.config.minimum_interval_seconds):
+                return self.start('screen_event', image=self.window.frame_image)
+            if self.gate.candidate is not None:
+                return False
+        return self.start('quiet_chat')
 
     def refresh(self):
         if self.closed:
@@ -70,6 +119,16 @@ class AIController(QObject):
         w.ai_auto.blockSignals(False)
         w.ai_auto.setEnabled(passed and self.enabled)
         w.ai_enable.setEnabled(passed or self.enabled)
+        w.ai_quiet.blockSignals(True)
+        w.ai_quiet.setChecked(self.quiet_enabled)
+        w.ai_quiet.blockSignals(False)
+        w.ai_quiet.setEnabled(passed and self.enabled)
+        w.ai_quiet_test.setEnabled(passed and self.enabled and self.worker is None)
+        wait = max(0, math.ceil((self.config.quiet_interval_minutes*60-(self.clock()-self.last_activity))/60))
+        state = f'下一批最早約 {wait} 分鐘後；有互動會延後' if self.quiet_enabled else '預設關閉；需自行勾選'
+        if self.quiet_blocked_day == taipei_now().isoformat()[:10]:
+            state = '今日安靜聊天額度不足；明日再試'
+        w.ai_quiet_note.setText(f'{state}\n每 3 分鐘本機檢查 · 冷卻至少 {self.config.quiet_interval_minutes} 分鐘\n今日安靜聊天估算 NT${self.ledger.quiet_today():.4f}／NT${self.config.quiet_daily_budget_twd:.2f}\n同時計入月預算，不自動儲值；整批輸出上限 {self.config.max_output_tokens} tokens。')
         w.ai_screen_test.setEnabled(self.worker is None)
         w.ai_reply_test.setEnabled(self.worker is None)
 
@@ -79,11 +138,11 @@ class AIController(QObject):
         accepted = dialog.exec() == QDialog.DialogCode.Accepted
         self.config = self.ledger.config()
         if accepted:
-            self.last_note = '設定已保存 · 請先完成兩項單次成本測試'
+            self.last_note = '設定已保存 · 可重新啟用文字 AI' if self.ledger.tests_passed(self.config) else '設定已保存 · 請先完成兩項單次成本測試'
         self.refresh()
 
     def pause(self):
-        self.enabled = self.autonomous = False
+        self.enabled = self.autonomous = self.quiet_enabled = False
         self.pending_user = False
         self.voice_inputs.clear()
         self.generation += 1
@@ -98,6 +157,7 @@ class AIController(QObject):
             self.enabled = False
         elif checked:
             self.enabled = True
+            self.activity()
             self.last_note = '文字 AI 已啟用 · 自主畫面分析需另勾選'
         else:
             self.pause()
@@ -119,6 +179,7 @@ class AIController(QObject):
             self.start('screen_event', image=image)
 
     def user_sent(self, transient_text=None, user_message_id="latest", include_image=False):
+        self.activity()
         if not self.enabled:
             return
         if transient_text is not None:
@@ -134,14 +195,20 @@ class AIController(QObject):
         return True
 
     def start(self, kind, image=None):
+        if self.closed:
+            return False
         if self.worker:
             self.last_note = '已有 AI 請求進行中；不會同時再送出'
             self.refresh()
             return False
-        if kind not in {'screen_test', 'reply_test', 'screen_event', 'user_reply'}:
+        if kind not in {'screen_test', 'reply_test', 'screen_event', 'user_reply', 'quiet_chat', 'quiet_test'}:
             raise AIError('不支援的 AI 工作。')
         if kind == 'screen_event' and not self.autonomous or kind == 'user_reply' and not self.enabled:
             return False
+        if kind in {'quiet_chat', 'quiet_test'} and (not self.enabled or not self.ledger.tests_passed(self.config) or (kind == 'quiet_chat' and not self.quiet_enabled)):
+            return False
+        if kind in {'quiet_chat', 'quiet_test'}:
+            image = None
         if kind in {'screen_test', 'screen_event'} and self.window.backend.is_demo:
             self.last_note = '合成展示畫面不會送至付費 API'
             self.refresh()
@@ -166,8 +233,14 @@ class AIController(QObject):
                 image = self.window.frame_image
             payload, upper = build_payload(self.config, characters, self.window.store, worldline, kind, image, selected, current_input)
             request_id, reserve = self.ledger.reserve(self.config, kind, upper)
+        except QuietBudgetExhausted as exc:
+            self.quiet_blocked_day = taipei_now().isoformat()[:10]
+            self.last_note = str(exc)
+            self.activity()
+            self.refresh()
+            return False
         except Exception as exc:
-            self.enabled = self.autonomous = False
+            self.enabled = self.autonomous = self.quiet_enabled = False
             self.voice_inputs.clear()
             self.last_note = str(exc) if isinstance(exc, AIError) else '本機 AI 資料／預算無法讀取；已停止呼叫，請保留資料。'
             self.refresh()
@@ -179,6 +252,7 @@ class AIController(QObject):
         self.request_config = self.config
         self.request_generation = self.generation
         self.failed_request = False
+        self.activity()
         if image is not None:
             self.gate.acknowledge(image)
         self.worker = AITask(key, payload, self)
@@ -198,17 +272,18 @@ class AIController(QObject):
             if self.request_generation != self.generation:
                 self.last_note = f'已取消顯示 · 已回報估算費用 NT${actual:.4f}'
                 return
-            turn = validate_turn(response, self.request_characters, self.kind, self.selected)
+            turn = validate_turn(response, self.request_characters, self.kind, self.selected, self.window.store, self.request_worldline)
             if self.window.worldline != self.request_worldline:
                 raise AIError('世界線已變更，忽略過時 AI 結果。')
-            records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id)
+            records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id, quiet_cooldown=self.request_config.quiet_interval_minutes)
             for record in records:
                 self.window.render_message(record)
-            if self.kind in {'screen_test', 'reply_test'}:
-                self.ledger.mark_test(self.request_config, self.kind, self.request_id)
+            if self.kind in {'screen_test', 'reply_test', 'quiet_test'}:
+                if self.kind != 'quiet_test':
+                    self.ledger.mark_test(self.request_config, self.kind, self.request_id)
                 detail = turn['summary'] if self.kind == 'screen_test' else '角色回覆已保存到聊天'
                 QMessageBox.information(self.window, '單次實際用量測試', f"模型：{self.request_config.model}\nAPI 回報輸入 {response['usage']['prompt_tokens']} token／輸出 {response['usage']['completion_tokens']} token\n本機估算 NT${actual:.4f}\n{detail}\n\n這是實際請求的用量換算，平台實際帳單以 OpenAI 為準。")
-            self.last_note = f'本次估算 NT${actual:.4f} · ' + ('沒有新事件／未發言' if not records and self.kind == 'screen_event' else '已完成')
+            self.last_note = f'本次估算 NT${actual:.4f} · ' + ('未發言；本次分析仍計費' if not records and self.kind in {'screen_event', 'quiet_chat', 'quiet_test'} else '已完成')
         except Exception as exc:
             self.failure(str(exc) if isinstance(exc, AIError) else 'AI 結果儲存失敗，已停止 AI；保留用量與既有資料。')
         finally:
@@ -218,7 +293,12 @@ class AIController(QObject):
         if self.closed:
             return
         self.ledger.abandon(self.request_id)
-        self.enabled = self.autonomous = False
+        if self.kind == 'quiet_chat' and self.request_generation != self.generation and self.enabled and not self.quiet_enabled:
+            self.last_note = '安靜聊天已取消 · 保留可能費用；文字／語音回覆可繼續'
+            self.failed_request = False
+            self.refresh()
+            return
+        self.enabled = self.autonomous = self.quiet_enabled = False
         self.failed_request = True
         self.pending_user = False
         self.voice_inputs.clear()
@@ -230,6 +310,7 @@ class AIController(QObject):
             return
         task = self.worker
         self.worker = None
+        self.activity()
         if task:
             task.deleteLater()
         self.refresh()
@@ -241,6 +322,7 @@ class AIController(QObject):
         if self.closed:
             return
         self.pause()
+        self.quiet_timer.stop()
         self.closed = True
         if self.worker:
             self.worker.succeeded.disconnect(self.success)
@@ -260,7 +342,13 @@ class AISettingsDialog(QDialog):
         self.c = controller
         self.setWindowTitle('API 安全設定、預算與估算價格')
         self.resize(610, 660)
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        layout = QVBoxLayout(content)
         note = QLabel('金鑰僅由 Windows DPAPI 加密存於本機帳號，不寫入程式或 GitHub。\nOpenAI API 計費與 ChatGPT 訂閱分開。\n所有畫面分析、角色回覆與成本測試共用月預算；不自動重試。')
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -288,9 +376,19 @@ class AISettingsDialog(QDialog):
         self.interval.setSuffix(' 秒')
         form.addRow('AI 最短間隔（非定時呼叫）', self.interval)
         self.output_limit = QSpinBox()
-        self.output_limit.setRange(256, 6000)
+        self.output_limit.setRange(256, 2000)
         self.output_limit.setValue(controller.config.max_output_tokens)
         form.addRow('每次最大輸出 token', self.output_limit)
+        token_note = QLabel('建議先設 2000；這是整批角色、敘事、翻譯與格式的共用上限。\n按實際使用量計費，不會每次收滿上限；降低輸出不會刪減人格。')
+        token_note.setWordWrap(True)
+        form.addRow(token_note)
+        self.quiet_interval = QSpinBox()
+        self.quiet_interval.setRange(3, 30)
+        self.quiet_interval.setValue(controller.config.quiet_interval_minutes)
+        self.quiet_interval.setSuffix(' 分鐘')
+        form.addRow('安靜聊天冷卻（每 3 分鐘檢查）', self.quiet_interval)
+        self.quiet_budget = self.number(controller.config.quiet_daily_budget_twd, .01, 1_000_000, 2)
+        form.addRow('安靜聊天每日額度 NT$', self.quiet_budget)
         self.model.currentTextChanged.connect(self.price_for_model)
         price_note = QLabel('預填價格為模型公開參考值，未即時核對；匯率 33 是估算值。\n請自行核對 https://openai.com/api/pricing/\n實際帳單：https://platform.openai.com/settings/organization/billing/overview\n剩餘預算＝月預算－程式估算費用－可能已計費的待確認金額。\n平台其他程式用量、稅金及匯差不在本機估算內。')
         price_note.setWordWrap(True)
@@ -331,7 +429,7 @@ class AISettingsDialog(QDialog):
     def save(self):
         try:
             new_key = self.key.text().strip()
-            value = AIConfig(model=self.model.currentText(), input_usd_per_million=self.input_price.value(), output_usd_per_million=self.output_price.value(), twd_per_usd=self.fx.value(), monthly_budget_twd=self.budget.value(), max_output_tokens=self.output_limit.value(), minimum_interval_seconds=self.interval.value(), transmission_approved=self.approved.isChecked(), key_revision=uuid.uuid4().hex if new_key else self.c.config.key_revision)
+            value = AIConfig(model=self.model.currentText(), input_usd_per_million=self.input_price.value(), output_usd_per_million=self.output_price.value(), twd_per_usd=self.fx.value(), monthly_budget_twd=self.budget.value(), max_output_tokens=self.output_limit.value(), minimum_interval_seconds=self.interval.value(), transmission_approved=self.approved.isChecked(), key_revision=uuid.uuid4().hex if new_key else self.c.config.key_revision, quiet_interval_minutes=self.quiet_interval.value(), quiet_daily_budget_twd=self.quiet_budget.value())
             value.validate()
             # Invalidate prior cost tests before rotating the credential, even if
             # saving the key or config later fails. No partially rotated key can

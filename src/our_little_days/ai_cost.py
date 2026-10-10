@@ -1,5 +1,5 @@
 """Durable billing journal. Memory restore never rewinds potential API spending."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from contextlib import closing
 from datetime import datetime
 from decimal import Decimal, ROUND_CEILING
@@ -17,6 +17,10 @@ class AIError(RuntimeError):
     pass
 
 
+class QuietBudgetExhausted(AIError):
+    pass
+
+
 @dataclass(frozen=True)
 class AIConfig:
     model: str = 'gpt-4.1-mini'
@@ -24,26 +28,30 @@ class AIConfig:
     output_usd_per_million: float = 1.60
     twd_per_usd: float = 33.0
     monthly_budget_twd: float = 500.0
-    max_output_tokens: int = 2500
+    max_output_tokens: int = 2000
     minimum_interval_seconds: int = 120
     transmission_approved: bool = False
     key_revision: str = ''
+    quiet_interval_minutes: int = 6
+    quiet_daily_budget_twd: float = 10.0
 
     def validate(self):
         # Other model families have different image accounting / output controls.
         if self.model not in {'gpt-4.1-mini', 'gpt-4.1', 'gpt-4o-mini'}:
             raise AIError('這個最小版本支援 gpt-4.1-mini、gpt-4.1、gpt-4o-mini；請核對所選模型價格。')
-        for value in (self.input_usd_per_million, self.output_usd_per_million, self.twd_per_usd, self.monthly_budget_twd):
+        for value in (self.input_usd_per_million, self.output_usd_per_million, self.twd_per_usd, self.monthly_budget_twd, self.quiet_daily_budget_twd):
             if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
                 raise AIError('價格、匯率與月預算必須為大於零的有效數字。')
-        if not 256 <= self.max_output_tokens <= 6000 or not 60 <= self.minimum_interval_seconds <= 3600:
+        if not 256 <= self.max_output_tokens <= 2000 or not 60 <= self.minimum_interval_seconds <= 3600:
             raise AIError('輸出上限或 AI 最短間隔不正確。')
+        if type(self.quiet_interval_minutes) is not int or not 3 <= self.quiet_interval_minutes <= 30:
+            raise AIError('安靜聊天冷卻需為 3–30 分鐘。')
 
     @property
     def fingerprint(self):
         value = asdict(self)
         # Budget and interval edits do not invalidate a completed model cost test.
-        for key in ('monthly_budget_twd', 'minimum_interval_seconds', 'transmission_approved'):
+        for key in ('monthly_budget_twd', 'minimum_interval_seconds', 'transmission_approved', 'quiet_interval_minutes', 'quiet_daily_budget_twd'):
             value.pop(key)
         return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
 
@@ -80,6 +88,10 @@ class UsageLedger:
     def config(self):
         row = self.db.execute("SELECT value FROM config WHERE key='ai'").fetchone()
         value = AIConfig(**json.loads(row[0])) if row else AIConfig()
+        # User requested a shared 2000-token cap; upgrade older stored 2500+ caps.
+        if value.max_output_tokens > 2000:
+            value = replace(value, max_output_tokens=2000)
+            self.save_config(value)
         value.validate()
         return value
 
@@ -106,6 +118,10 @@ class UsageLedger:
             total = self.db.execute('SELECT COALESCE(SUM(charged),0) FROM requests WHERE created_at LIKE ?', (now[:7] + '%',)).fetchone()[0]
             if total + units > int(Decimal(str(config.monthly_budget_twd)) * 1_000_000):
                 raise AIError('月預算不足以預留這次請求；已停止付費呼叫。可調整預算或等下個月。')
+            if kind in {'quiet_chat', 'quiet_test'}:
+                daily = self.db.execute("SELECT COALESCE(SUM(charged),0) FROM requests WHERE created_at LIKE ? AND kind IN ('quiet_chat','quiet_test')", (now[:10] + '%',)).fetchone()[0]
+                if daily + units > int(Decimal(str(config.quiet_daily_budget_twd)) * 1_000_000):
+                    raise QuietBudgetExhausted('今日安靜聊天額度不足以預留下一次；明日再試，文字／語音回覆仍可使用。')
             self.db.execute('INSERT INTO requests VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                             (request_id, now, kind, config.model, json.dumps(asdict(config)), 'reserved', units, units, None, None, None,))
             self.db.commit()
@@ -113,6 +129,9 @@ class UsageLedger:
             self.db.rollback()
             raise
         return request_id, units / 1_000_000
+
+    def quiet_today(self):
+        return self.db.execute("SELECT COALESCE(SUM(charged),0) FROM requests WHERE created_at LIKE ? AND kind IN ('quiet_chat','quiet_test')", (taipei_now().isoformat()[:10] + '%',)).fetchone()[0] / 1_000_000
 
     def settle(self, request_id, usage, provider_id):
         if not isinstance(usage, dict):

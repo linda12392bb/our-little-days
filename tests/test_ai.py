@@ -60,7 +60,7 @@ def test_all_request_types_share_budget_and_uncertain_charges_persist(tmp_path):
 def test_atomic_budget_across_two_connections_and_price_snapshot(tmp_path):
     a = UsageLedger(tmp_path / 'budget.sqlite3')
     b = UsageLedger(tmp_path / 'budget.sqlite3')
-    config = replace(AIConfig(), monthly_budget_twd=.25)
+    config = replace(AIConfig(), monthly_budget_twd=.20)
     rid, reserve = a.reserve(config, 'screen_test', 1000)
     with pytest.raises(AIError):
         b.reserve(config, 'reply_test', 1000)

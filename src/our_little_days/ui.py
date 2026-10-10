@@ -336,6 +336,14 @@ class MainWindow(QMainWindow):
         self.ai_auto = QCheckBox("啟用畫面事件自主陪伴")
         self.ai_auto.toggled.connect(lambda checked: self.ai.auto(checked) if self.ai else None)
         controls_layout.addWidget(self.ai_auto)
+        self.ai_quiet = QCheckBox("啟用安靜時住戶自行聊天（會使用 API）")
+        self.ai_quiet.toggled.connect(lambda checked: self.ai.quiet(checked) if self.ai else None)
+        controls_layout.addWidget(self.ai_quiet)
+        self.ai_quiet_test = QPushButton("單次安靜群聊 · 測量費用")
+        self.ai_quiet_test.clicked.connect(lambda: self.ai.start('quiet_test') if self.ai else None)
+        controls_layout.addWidget(self.ai_quiet_test)
+        self.ai_quiet_note = label("預設關閉 · 每批共用一次請求", "hint", True)
+        controls_layout.addWidget(self.ai_quiet_note)
         ai_pause = QPushButton("暫停所有 AI · 保留記憶")
         ai_pause.clicked.connect(lambda: self.ai.pause() if self.ai else None)
         controls_layout.addWidget(ai_pause)
@@ -414,7 +422,7 @@ class MainWindow(QMainWindow):
         for widget in (self.voice_save, self.voice_auto):
             widget.toggled.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
         controls_layout.addStretch()
-        controls_layout.addWidget(label("Windows 本機 · 語音試用 0.3.2", "sectionTitle"))
+        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.0", "sectionTitle"))
         controls_layout.addWidget(label("聊天與角色資料永久保存在本機。\n不錄影、不存截圖。只有手動啟用 AI 後，\n選定視窗圖片與所需文字才會傳送 API。\n暫停觀察不會刪除記憶。", "hint", True))
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -425,7 +433,7 @@ class MainWindow(QMainWindow):
         controls_scroll.setWidget(controls)
         columns.addWidget(controls_scroll)
         columns.setSizes([170, 620, 285])
-        outer.addWidget(label("語音試用 0.3.2  /  自動收音 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
+        outer.addWidget(label("自主陪伴試用 0.4.0  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
         self.update_controls()
 
     def apply_theme(self, *_):

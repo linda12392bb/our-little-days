@@ -93,6 +93,25 @@ def check_package(speech_test_dir=None):
             assert len(context['characters']) == 13
             assert {c['id']: c['source_text'] for c in context['characters']} == {c.id: c.source_text for c in characters}
             checks.append('AI offline by default; budget UI and complete 13-persona payload verified without API calls')
+            assert not window.ai.quiet_enabled and window.ai.quiet_timer.interval() == 180000
+            assert window.ai.config.max_output_tokens == 2000
+            assert window.ai.config.quiet_daily_budget_twd == 10
+            from .ai_engine import save_turn, validate_turn
+            sample_turn = {'meaningful': False, 'event_key': '', 'summary': '', 'important': False,
+                          'messages': [{'speaker_id': 'light', 'recipient_ids': ['order'], 'reply_to_index': None,
+                                        'segments': [{'kind': 'speech', 'text': '封裝接話測試。', 'translation': ''}]}]}
+            original = save_turn(store, 'main', sample_turn, profiles, 'quiet_chat')[0]
+            sample_turn['messages'] = [{'speaker_id': 'order', 'recipient_ids': ['light'], 'reply_to_index': None,
+                                      'reply_to_message_id': original['id'],
+                                      'segments': [{'kind': 'speech', 'text': '表示テストやで♡', 'translation': '這是顯示測試喔♡'}]}]
+            validated = validate_turn({'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(sample_turn)}}]}, profiles, 'quiet_chat', store=store)
+            reply = save_turn(store, 'main', validated, profiles, 'quiet_chat')[0]
+            assert reply['reply_to'] == original['id']
+            assert store.conversation_context('main')['anchor_messages']
+            assert not store.conversation_context('glasshouse')['anchor_messages']
+            continuity = store.conversation_state('main')
+            messages = store.messages()
+            checks.append('quiet chat defaults OFF; 3-minute local check, 2000 shared output cap, NT$10 daily cap and persistent cross-batch peer replies verified with synthetic data, no API')
             if sys.platform == 'win32':
                 from .ai_provider import WindowsKeyStore
                 keys = WindowsKeyStore(folder)
@@ -116,6 +135,8 @@ def check_package(speech_test_dir=None):
             assert len(store.events()) == len(store.memories()) == 1
             assert not window.timer.isActive() and window.frame_image is None
             assert len(window.cards) == len(messages)
+            assert store.conversation_state('main') == continuity
+            assert not window.ai.quiet_enabled
             checks.append("close/reopen preserves profiles, relationships, chat, events and memory")
             store.append_message(speaker_id="user", speaker_name="月鹿", text="備份之後")
             safety = store.restore(snapshot, confirmed=True)

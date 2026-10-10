@@ -1,4 +1,4 @@
-# Windows 安裝與啟動：自動語音輸入試用版 0.3.2
+# Windows 安裝與啟動：自主陪伴試用版 0.4.0
 
 這是 Windows 本機桌面程式。ZIP 已含 OurLittleDays.exe 與全部執行檔，**不用安裝 Python、不用下載原始碼、不用輸入指令、不用部署雲端網站**。支援 Windows 10/11 Intel / AMD 64 位元。
 
@@ -6,7 +6,7 @@
 
 1. 先在舊版按「記憶、事件與備份」→「備份整間公寓…」，將備份存到文件資料夾。關閉舊公寓視窗。
 2. 登入自己的 GitHub 帳號，開啟私人儲存庫的下載頁：
-   https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Voice-0.3.2-preview.zip
+   https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.0-preview.zip
 3. 按檔案中間藍色 **View raw**，或右上方向下箭頭，下載 ZIP。這是下載，不需要預覽。不要按「Code → Download ZIP」，那是原始碼。
 4. 到電腦「下載」資料夾，對 ZIP 按右鍵 →「全部解壓縮」。選新資料夾，例如「文件\OurLittleDays-Voice」。等待完成。
 5. 打開解壓後的 OurLittleDays 資料夾，雙擊 OurLittleDays.exe。不要把 .exe 單獨搬出；同層的 _internal 與 speech-runtime 必須保留。
@@ -30,7 +30,7 @@ ChatGPT 訂閱與 API 計費分開。**請不要把 Key 貼到聊天室、GitHub
 1. 在公寓右側往下捲，找到「AI 與費用控制」，按「API 安全設定／月預算」。
 2. 在密碼欄貼入自己的 API Key。金鑰由 Windows 帳號加密保存。
 3. 模型先維持 **gpt-4.1-mini**；它支援圖片理解。程式沒有使用 GPT-6 LUNA。
-4. 月預算預設 **NT$500**，可自行修改。最大輸出 2500 token，AI 最短間隔 120 秒可先維持。
+4. 月預算預設 **NT$500**，可自行修改。最大輸出 2000 token，AI 最短間隔 120 秒可先維持。
 5. 輸入／輸出價格是 USD／百萬 token，匯率是估算值。預填 $0.40 / $1.60、33，並非即時查價。請核對 https://openai.com/api/pricing/；若價格不同，在欄位修改。
 6. 核對後勾選「已核對估算價格；同意 AI 使用完整人格、目前世界線聊天／記憶及選定視窗圖片」。
 7. 按「保存設定」。這一步不會送出任何 API 請求。
@@ -85,3 +85,7 @@ https://platform.openai.com/settings/organization/billing/overview
 首次更新只把你已確認的序「調戲、♡」加到既有語氣／行為，先備份舊資料。其他角色人格與原文不會被種子覆寫。
 
 詳細實測步驟：[WINDOWS_TEST_CHECKLIST.md](WINDOWS_TEST_CHECKLIST.md)。
+
+## 安靜時住戶自行聊天
+
+新版新增獨立開關，不需持續擷取。每 3 分鐘本機檢查，預設 6 分鐘冷卻；每批最多 2000 tokens，母語、翻譯與格式全部共用。安靜每日估算 NT$10，所有請求共用月預算 NT$500，沒有自動儲值。先啟用文字 AI，按「單次安靜群聊 · 測量費用」檢查效果，再勾「啟用安靜時住戶自行聊天」。角色跨批次接話保存，詳見 [QUIET_CHAT.md](QUIET_CHAT.md)。

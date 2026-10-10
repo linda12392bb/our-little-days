@@ -89,7 +89,7 @@ def main():
         raise ValueError("Frozen package check failed")
     report["build_environment"] = args.build_environment
     report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    for name in ["WINDOWS_USER_GUIDE.md", "WINDOWS_TEST_CHECKLIST.md", "VOICE_INPUT.md"]:
+    for name in ["WINDOWS_USER_GUIDE.md", "WINDOWS_TEST_CHECKLIST.md", "VOICE_INPUT.md", "QUIET_CHAT.md"]:
         shutil.copyfile(root / "docs" / name, folder / name)
     (folder / "START_HERE.txt").write_text((root / "docs/WINDOWS_USER_GUIDE.md").read_text(encoding="utf-8"), encoding="utf-8-sig")
     shutil.copytree(root / "packaging/licenses", folder / "LICENSES", dirs_exist_ok=True)
@@ -107,7 +107,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.3.2",
+        "version": "0.4.0",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -119,13 +119,13 @@ def main():
         "whisper_runtime": speech_manifest,
         "windows_manual_acceptance": "not_run",
         "signing": "unsigned",
-        "scope": "Automatic microphone input, local VAD and offline multilingual Whisper; existing Phase 2/3 AI and budget. Native microphone, ASR accuracy and live API acceptance pending.",
+        "scope": "Optional quiet peer chat with a 3-minute local eligibility check, persistent cross-batch reply anchors, 2000 shared output tokens, NT$10 daily quiet cap and centralized NT$500 monthly cap; existing offline microphone and screen AI. Native Windows and live model interaction/cost acceptance pending.",
     }
     (folder / "BUILD_INFO.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Voice-0.3.2-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.0-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():
