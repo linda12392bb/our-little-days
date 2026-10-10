@@ -1,0 +1,155 @@
+"""Isolated package verification; never opens the user's apartment or captures a screen."""
+from dataclasses import asdict
+import hashlib
+import json
+import multiprocessing
+import os
+from pathlib import Path
+import sys
+from tempfile import TemporaryDirectory
+
+
+def _spawn_probe(connection):
+    # The real capture worker needs this module and Windows DLLs in the frozen child.
+    if sys.platform == "win32":
+        from . import win32
+        assert callable(win32.capture_window)
+    connection.send("spawn-ok")
+    connection.close()
+
+
+def _transport_probe(connection, key, payload):
+    import ssl
+    ssl.create_default_context()
+    connection.send(('ok', {'probe': key == 'package-test-not-an-api-key', 'bytes': len(payload['image'])}))
+    connection.close()
+
+
+def check_package():
+    from PySide6.QtWidgets import QApplication
+    from .capture import DemoBackend
+    from .models import load_apartment_settings, load_characters
+    from .storage import SQLiteStore
+    from .ui import MainWindow
+
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    app = QApplication.instance() or QApplication([])
+    characters = load_characters()
+    original = json.loads(json.dumps({c.id: asdict(c) for c in characters}, ensure_ascii=False))
+    by_id = {c.id: c for c in characters}
+    assert len(characters) == 13
+    assert all(c.source_text and c.decision_rules and c.behavior for c in characters)
+    assert by_id["light"].appearance["height_cm"] == 186
+    assert by_id["shogo"].appearance["height_cm"] == 180
+    assert by_id["shogo"].relationships["worldlines"]["main"]["date_agreement"]
+    checks = ["all 13 profiles, original sections and confirmed appearances loaded"]
+    with TemporaryDirectory(prefix="our-little-days-package-") as temporary:
+        folder = Path(temporary) / "公寓封裝測試"
+        store = SQLiteStore(folder / "apartment.sqlite3")
+        window = None
+        try:
+            store.seed(characters, load_apartment_settings())
+            window = MainWindow(DemoBackend(), store.load_characters(), store)
+            window.show()
+            app.processEvents()
+            window.chat_input.setPlainText("封裝測試：重新開啟仍保留 ☾")
+            window.send_message()
+            window.character_combo.setCurrentIndex(11)
+            window.add_test_message()
+            store.add_event("封裝測試事件")
+            store.add_memory("封裝測試長期記憶", character_id="shogo")
+            messages = store.messages()
+            profiles = store.load_characters()
+            assert json.loads(json.dumps({c.id: asdict(c) for c in profiles}, ensure_ascii=False)) == original
+            assert window.ai is not None
+            assert not window.ai.enabled and not window.ai.autonomous
+            assert window.ai.ledger.totals()['month']['requests'] == 0
+            assert '剩餘預算' in window.ai_usage.text()
+            from .ai_engine import build_payload
+            from .ai_cost import AIConfig
+            payload, upper = build_payload(AIConfig(), profiles, store, 'main', 'user_reply')
+            context = json.loads(payload['messages'][1]['content'][0]['text'])
+            assert len(context['characters']) == 13
+            assert {c['id']: c['source_text'] for c in context['characters']} == {c.id: c.source_text for c in characters}
+            checks.append('AI offline by default; budget UI and complete 13-persona payload verified without API calls')
+            if sys.platform == 'win32':
+                from .ai_provider import WindowsKeyStore
+                keys = WindowsKeyStore(folder)
+                dummy = 'package-test-not-an-api-key'
+                keys.save(dummy)
+                assert dummy.encode() not in keys.path.read_bytes()
+                assert WindowsKeyStore(folder).read() == dummy
+                checks.append('Windows DPAPI dummy-key encrypted roundtrip (build environment only)')
+            assert window.grab().width() > 0
+            snapshot = store.backup(folder / "backup.sqlite3")
+            checks.append("Qt offscreen interface and Unicode SQLite paths work")
+            window.close()
+            app.processEvents()
+            window = None
+            store.close()
+            store = SQLiteStore(folder / "apartment.sqlite3")
+            store.seed(characters, load_apartment_settings())
+            window = MainWindow(DemoBackend(), store.load_characters(), store)
+            assert store.messages() == messages
+            assert store.load_characters() == profiles
+            assert len(store.events()) == len(store.memories()) == 1
+            assert not window.timer.isActive() and window.frame_image is None
+            assert len(window.cards) == len(messages)
+            checks.append("close/reopen preserves profiles, relationships, chat, events and memory")
+            store.append_message(speaker_id="user", speaker_name="月鹿", text="備份之後")
+            safety = store.restore(snapshot, confirmed=True)
+            assert safety.is_file() and store.messages() == messages
+            checks.append("consistent SQLite backup and restore with safety copy")
+        finally:
+            if window is not None:
+                window.close()
+                app.processEvents()
+            store.close()
+    from .ai_provider import request_api
+    transport = request_api('package-test-not-an-api-key', {'image': 'x' * 200000}, lambda: False, _transport=_transport_probe)
+    assert transport == {'probe': True, 'bytes': 200000}
+    checks.append('frozen cancellable transport spawn and TLS context initialized; mock transport, no network')
+    ctx = multiprocessing.get_context("spawn")
+    receiver, sender = ctx.Pipe(duplex=False)
+    process = ctx.Process(target=_spawn_probe, args=(sender,))
+    try:
+        process.start()
+        sender.close()
+        if not receiver.poll(30):
+            raise RuntimeError("Frozen child process did not respond")
+        assert receiver.recv() == "spawn-ok"
+        process.join(5)
+        assert process.exitcode == 0
+        checks.append("spawn child process completed" + (" and imported Windows capture bindings" if sys.platform == "win32" else " (Windows bindings not checked on Linux)"))
+    finally:
+        if process.pid is not None:
+            if process.is_alive():
+                process.terminate()
+                process.join(5)
+            process.close()
+        receiver.close()
+        sender.close()
+    return {
+        "status": "passed",
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "python_platform": sys.platform,
+        "qt_platform": app.platformName(),
+        "checks": checks,
+        "source_text_sha256": {c.id: hashlib.sha256(c.source_text.encode("utf-8")).hexdigest() for c in characters},
+        "windows_manual_acceptance": "not_run",
+        "limitations": ["synthetic/offscreen UI only", "no real selected-window capture", "no live model API or actual billed cost test", "no native Windows Phase 2/3 acceptance"],
+    }
+
+
+def write_report(destination):
+    import traceback
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        report = check_package()
+        code = 0
+    except Exception:
+        report = {"status": "failed", "traceback": traceback.format_exc(), "windows_manual_acceptance": "not_run"}
+        code = 1
+    destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return code

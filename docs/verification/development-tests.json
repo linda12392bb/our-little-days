@@ -1,0 +1,10 @@
+{
+  "command": ".venv/bin/python -m pytest -q",
+  "passed": 83,
+  "skipped": 2,
+  "live_api_requests": 0,
+  "native_windows_phase2_3": "not_run",
+  "single_live_cost_tests": "pending_on_user_windows",
+  "static_screen_simulation_hours": 10,
+  "character_integrity": "13 passed; original source texts retained"
+}

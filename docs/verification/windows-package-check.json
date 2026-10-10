@@ -1,0 +1,39 @@
+{
+  "status": "passed",
+  "frozen": true,
+  "python_platform": "win32",
+  "qt_platform": "offscreen",
+  "checks": [
+    "all 13 profiles, original sections and confirmed appearances loaded",
+    "AI offline by default; budget UI and complete 13-persona payload verified without API calls",
+    "Windows DPAPI dummy-key encrypted roundtrip (build environment only)",
+    "Qt offscreen interface and Unicode SQLite paths work",
+    "close/reopen preserves profiles, relationships, chat, events and memory",
+    "consistent SQLite backup and restore with safety copy",
+    "frozen cancellable transport spawn and TLS context initialized; mock transport, no network",
+    "spawn child process completed and imported Windows capture bindings"
+  ],
+  "source_text_sha256": {
+    "light": "8589807bf5837440f1892f0c3535104856bcbe5ea76419a458dffad44d258ab0",
+    "order": "ed0b2eadfd151dd936d4f65b14735f878707c5f5a9b507dc0fcd08d6ccc91d59",
+    "noel": "f6139d8e89a543f5ff55dd0bcef1a101c28f74c0243ee97f5db296801e263312",
+    "haru": "d69f14c6794b0bae34f968415c83ca772c5e3fdc00cb0b05936784d6ef6250b9",
+    "reo": "492b589750a439f26ebf665992b8ce94fcdf572de5f55ef31846d5700b61a429",
+    "luoyang": "491055df6f9507c761502a5064ad5b926690bbcc5aa3b0a457faea0ac6e644ed",
+    "rixo": "b540432dd2194c376a59dae0c22db3c9007f9026865136e9ebb0771fc855e06b",
+    "senya": "67dc848b9cb9e444597fad235da675fae85f51ac1d629071940e553a8037c452",
+    "mero": "420c78b1e8c91ac29b3ace2cb53e208b1cd0a0c6d7d882871146901af3ca2ed8",
+    "sensei": "ecb52c68f55000a7f2e31c207035e463848e58d84147faf78398a6e3cac53003",
+    "hao": "d8c9430675bdcbad2fcc5708ec2c342893f11ced50673581b7ade94f0dfcd490",
+    "shogo": "be4d3f7a06e385b12eaaf7dac8a2e587d723d6b965e286c6c30c2c419e4c598b",
+    "yuri": "93bd1bdb8291fa5f90c6830f2f8afab475059270bfe81a76d40e8ada0a20dd6d"
+  },
+  "windows_manual_acceptance": "not_run",
+  "limitations": [
+    "synthetic/offscreen UI only",
+    "no real selected-window capture",
+    "no live model API or actual billed cost test",
+    "no native Windows Phase 2/3 acceptance"
+  ],
+  "build_environment": "linux-wine"
+}

@@ -1,0 +1,321 @@
+{
+  "checked_at_taipei": "2026-10-10T23:39:03.487163+08:00",
+  "status": "passed",
+  "profile_count": 13,
+  "files": [
+    "/workspace/our-little-days/src/our_little_days/data/characters/light.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/order.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/noel.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/haru.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/reo.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/luoyang.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/rixo.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/senya.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/mero.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/sensei.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/hao.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/shogo.json",
+    "/workspace/our-little-days/src/our_little_days/data/characters/yuri.json"
+  ],
+  "source_documents": [
+    {
+      "path": "/workspace/our-little-days/docs/BRIEF.md",
+      "sha256": "31ddfacf8df087e9a948e019f9f0817076ce80efa836ae5719c93608b781e58a",
+      "matches_retained_original": true
+    },
+    {
+      "path": "/workspace/our-little-days/docs/CHARACTER_BRIEF.md",
+      "sha256": "287f2b1744d513e34db288dce5192a1a3f787c72cdfb19d1c62fb4ee2a21a76e",
+      "matches_retained_original": true
+    }
+  ],
+  "source_text_exact_substrings": 13,
+  "profile_integrity": {
+    "haru": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/haru.json",
+      "sha256": "e342795caa5e4fe06b9b8ef144310a7757596d2eb36d527c61139d6aeca2de45",
+      "original_sha256": "e342795caa5e4fe06b9b8ef144310a7757596d2eb36d527c61139d6aeca2de45",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    },
+    "hao": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/hao.json",
+      "sha256": "6f7a852343d899b61b71cdbf29702e5062626b038bf720021cec1cc58a0dc016",
+      "original_sha256": "6f7a852343d899b61b71cdbf29702e5062626b038bf720021cec1cc58a0dc016",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "獨立結構與原文"
+    },
+    "sensei": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/sensei.json",
+      "sha256": "56183f2a78fcf919c0d48bbc3921ddda8360cfa337ec8fec78485822bdd1fd54",
+      "original_sha256": "56183f2a78fcf919c0d48bbc3921ddda8360cfa337ec8fec78485822bdd1fd54",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    },
+    "luoyang": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/luoyang.json",
+      "sha256": "931424a38fc76007a8193f67518c8c3bfe2f835aeb515042b97b6228d49a2da2",
+      "original_sha256": "931424a38fc76007a8193f67518c8c3bfe2f835aeb515042b97b6228d49a2da2",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "獨立結構與原文"
+    },
+    "order": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/order.json",
+      "sha256": "3bde307ac290d5bf54145ba4247d8f6be4d282fd24b175f68da2fdd3c586b6a2",
+      "original_sha256": "753393aee8dc1ee4575932da407ec1503b2d9e4c2b6bcc4531525205b373a25d",
+      "changed_fields_since_original": [
+        "behavior",
+        "tone"
+      ],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    },
+    "senya": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/senya.json",
+      "sha256": "2b2908ddf717c4bed12be67bb110b97fd3037012f8f322db0c89cc736ec7d57b",
+      "original_sha256": "2b2908ddf717c4bed12be67bb110b97fd3037012f8f322db0c89cc736ec7d57b",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "獨立結構與原文"
+    },
+    "shogo": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/shogo.json",
+      "sha256": "41131c98257d684903f2772bbc56d0523fe1bd30dc9239bca590e03183145c8d",
+      "original_sha256": "6d69460fd12ec1e962f904ec923f46bc5d40ae55151065a5df39d72c8dd95731",
+      "changed_fields_since_original": [
+        "appearance",
+        "pending_details"
+      ],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "獨立結構與原文"
+    },
+    "yuri": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/yuri.json",
+      "sha256": "2e274de5565250912daf811937280bf09f3500dbf811501d90f6dd05ffdae3b7",
+      "original_sha256": "2e274de5565250912daf811937280bf09f3500dbf811501d90f6dd05ffdae3b7",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    },
+    "rixo": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/rixo.json",
+      "sha256": "5feaf6536f36d8496bf5272a224cc1ea76cc23450681bf7ad4ac82a2164aa6eb",
+      "original_sha256": "5feaf6536f36d8496bf5272a224cc1ea76cc23450681bf7ad4ac82a2164aa6eb",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    },
+    "reo": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/reo.json",
+      "sha256": "39775c6219d63abccbd01c0afa8b0d1e6ad7e7ce338d4f417f825482486fbb68",
+      "original_sha256": "39775c6219d63abccbd01c0afa8b0d1e6ad7e7ce338d4f417f825482486fbb68",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    },
+    "noel": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/noel.json",
+      "sha256": "f0d677658a808983139d3eb5589a3b7d945fbe2a259d221518a7a2e2720d8f84",
+      "original_sha256": "f0d677658a808983139d3eb5589a3b7d945fbe2a259d221518a7a2e2720d8f84",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    },
+    "light": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/light.json",
+      "sha256": "251adfe7d3eca883633dbe3a895b27ef0912f95f085060a58a951678f62f23df",
+      "original_sha256": "6d5a7b36dd0b9df773f55c094297a4bbf58d3ac3cbf955ebe434adac2c09727d",
+      "changed_fields_since_original": [
+        "appearance",
+        "pending_details"
+      ],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": true,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    },
+    "mero": {
+      "path": "/workspace/our-little-days/src/our_little_days/data/characters/mero.json",
+      "sha256": "3c6861a426ef8f749b9a69e6b115280c0efac017277b93b4d1d6aa85c68ea6e8",
+      "original_sha256": "3c6861a426ef8f749b9a69e6b115280c0efac017277b93b4d1d6aa85c68ea6e8",
+      "changed_fields_since_original": [],
+      "missing_fields": [],
+      "unexpected_changes": [],
+      "source_text_unchanged": true,
+      "protected_fields_unchanged": true,
+      "personality_core_pending": false,
+      "relationship_storage": "原文保留；未新增結構化關係"
+    }
+  },
+  "language_checks": {
+    "luoyang": {
+      "speech_language": "ja",
+      "narration_language": "ja",
+      "strict_language": true,
+      "register": "自然隨意、流暢日文",
+      "translation_language": "zh-TW",
+      "translate_speech_and_narration": true,
+      "translation_preserves_personality": true,
+      "fixed_japanese_override": true
+    },
+    "reo": {
+      "speech_language": "ja",
+      "narration_language": "ja",
+      "strict_language": true,
+      "register": "全敬語",
+      "translation_language": "zh-TW",
+      "translate_speech_and_narration": true,
+      "translation_preserves_personality": true,
+      "first_person": "僕",
+      "non_keigo_exception": "僅具有極大情感重量的事件；禁止隨機漂移"
+    },
+    "rixo": {
+      "speech_language": "ja",
+      "narration_language": "ja",
+      "strict_language": true,
+      "register": "粗魯不良",
+      "translation_language": "zh-TW",
+      "translate_speech_and_narration": true,
+      "translation_preserves_personality": true
+    },
+    "order": {
+      "speech_language": "ja-Kansai",
+      "narration_language": "ja-Kansai",
+      "strict_language": true,
+      "register": "自然關西腔",
+      "translation_language": "zh-TW",
+      "translate_speech_and_narration": true,
+      "translation_preserves_personality": true
+    }
+  },
+  "active_worldline": "main",
+  "shogo_worldlines": {
+    "main": {
+      "label": "常駐主線",
+      "status": "正式交往",
+      "dating_confirmed": true,
+      "date_agreement": true,
+      "timeline_anchor": "交往與約會約定都發生在「戀愛罪法庭」事件之前",
+      "note": "維持原作人格，不退回曖昧、單戀或未確認交往"
+    },
+    "eleven_months": {
+      "label": "十一個月 AU",
+      "status": "正式情侶、同居",
+      "dating_confirmed": true,
+      "cohabiting": true,
+      "engaged": false,
+      "married": false
+    },
+    "glasshouse": {
+      "label": "GLASSHOUSE 哨嚮 AU",
+      "status": "雙方已表達愛情，尚未正式確認交往",
+      "dating_confirmed": false,
+      "mutual_love_expressed": true
+    },
+    "brothers": {
+      "label": "兄弟 AU",
+      "status": "保留既有戀愛表態紀錄；未提供正式交往狀態",
+      "dating_confirmed": null,
+      "memories": [
+        "曾向其他人承認對使用者帶有愛情成分",
+        "曾表達：選ばれたいよ。（我想被選擇。）"
+      ]
+    }
+  },
+  "pending": {
+    "light": [
+      "更完整的獨立人格核心",
+      "角色背景與年齡",
+      "與其他聲道的特定關係",
+      "其他已建立但尚未匯入的互動記憶"
+    ],
+    "shogo": [
+      "更詳細的既有互動事件",
+      "與其他十二聲道的具體關係",
+      "原作人格基準的進一步行為測試範例",
+      "實際年齡不詳，保留未知"
+    ]
+  },
+  "appearances": {
+    "light": {
+      "description": "高挑、肩膀較寬的成年男性體格；表情自然，笑起來明亮、有精神。",
+      "height_cm": 186,
+      "height_confirmed": true,
+      "hair": "黑色短髮",
+      "eyes": "琥珀色眼睛",
+      "clothing": "簡單俐落，不需要複雜裝飾",
+      "build": "高挑、肩膀較寬的成年男性體格",
+      "expression": "表情自然，笑起來明亮、有精神",
+      "basis": "使用者本次新提案"
+    },
+    "shogo": {
+      "description": "以《PSYCHO-PASS》第一季槙島聖護的官方角色設計為準，保留原作五官、髮型及氣質，不自行重新設計。",
+      "height_cm": 180,
+      "height_confirmed": true,
+      "hair": "白色偏銀的中長髮",
+      "eyes": "金色眼睛",
+      "clothing": null,
+      "build": "修長纖細的成年男性體態",
+      "basis": "《PSYCHO-PASS》第一季槙島聖護的官方角色設計",
+      "design_constraints": [
+        "保留原作五官、髮型及氣質",
+        "不自行重新設計"
+      ]
+    }
+  },
+  "limitations": [
+    "未匯入未提供的外部互動記憶",
+    "設定驗證不代表模型實際發言已通過人格／方言驗收",
+    "未啟動對話引擎或呼叫 API"
+  ]
+}

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "our-little-days"
+version = "0.2.0"
+description = "月色不打烊 — Windows 十三聲道陪伴室，Phase 2/3 最小試用版"
+requires-python = ">=3.11,<3.14"
+dependencies = ["PySide6==6.10.2"]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.2", "PyInstaller==6.19.0"]
+
+[project.scripts]
+our-little-days = "our_little_days.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+our_little_days = ["data/*.json", "data/*.txt", "data/characters/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

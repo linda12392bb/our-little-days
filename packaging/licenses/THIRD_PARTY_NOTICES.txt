@@ -1,0 +1,26 @@
+OUR LITTLE DAYS Phase 1 Windows preview
+
+This portable folder includes unmodified third-party components:
+
+* CPython 3.12.10: Python Software Foundation license and bundled notices.
+  See Python-LICENSE.txt and https://www.python.org/.
+* PySide6, Shiboken6 and Qt 6.10.2: distributed using their available
+  LGPL version 3 option for the included libraries. See LGPL-3.0-only.txt,
+  GPL-3.0-only.txt and the component license notices.
+  https://doc.qt.io/qtforpython-6/licenses.html
+  https://code.qt.io/cgit/qt/qtbase.git/?h=v6.10.2
+  https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.10.2
+* PyInstaller 6.19.0 bootloader: GPL version 2 or later with its bootloader
+  exception. See pyinstaller/COPYING.txt.
+  https://pyinstaller.org/en/stable/license.html
+
+Qt libraries are dynamically linked and remain separate files in _internal.
+Their source is available at the referenced repositories. You may replace
+these libraries with compatible modified versions and reverse engineer the
+application for debugging modifications to these LGPL-covered libraries
+as permitted by the LGPL. This preview does not impose an additional
+restriction on those rights.
+
+Build-time Wine and its temporary compatibility components are not included
+in this folder. All redistributed DLL/PYD files are checked against the
+Windows Python distribution or the installed pinned Windows wheels.

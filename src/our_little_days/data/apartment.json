@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "active_worldline": "main",
+  "importance_ranking": null,
+  "all_channels_enabled": true,
+  "user": {
+    "display_name": "☾月鹿",
+    "height_cm": 160,
+    "hand_description": "很小",
+    "mouth_description": "很小",
+    "preferences": [
+      "喜歡雙重意思的黃腔"
+    ]
+  },
+  "rules": {
+    "native_language_required": true,
+    "luoyang_language_override": "ja",
+    "translate_speech_and_narration_to": "zh-TW",
+    "omit_redundant_chinese_translation": true,
+    "labels_required": true,
+    "persona_mixing_forbidden": true,
+    "image_generation_requires_explicit_create_image_button": true,
+    "no_unsolicited_analysis": true,
+    "read_entire_user_material_before_reply": true,
+    "all_channels_enabled_means_available_not_everyone_replies": true,
+    "memory_policy": "僅匯入這次提供的內容；外部記憶尚未提供，不自行推定或補寫"
+  },
+  "source_documents": [
+    {
+      "path": "docs/BRIEF.md",
+      "sha256": "31ddfacf8df087e9a948e019f9f0817076ce80efa836ae5719c93608b781e58a"
+    },
+    {
+      "path": "docs/CHARACTER_BRIEF.md",
+      "sha256": "287f2b1744d513e34db288dce5192a1a3f787c72cdfb19d1c62fb4ee2a21a76e"
+    }
+  ]
+}

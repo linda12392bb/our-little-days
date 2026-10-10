@@ -1,24 +1,50 @@
-# 月色不打烊｜Windows Phase 1 試用包
+# ☾ 月色不打烊｜公寓還是一樣很吵
 
-這裡提供已製作完成的 Windows 本機桌面試用包。使用者不需要安裝 Python、下載原始碼或自行編譯；也不需要改成公開儲存庫或部署網站。
+OUR LITTLE DAYS · Windows 本機十三聲道陪伴室 · Phase 2/3 最小試用版 0.2.0
 
-## 下載與啟動
+[下載 Windows 試用包](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Phase2-3-preview.zip)：在 GitHub 檔案頁按 **View raw**。全部解壓後雙擊 OurLittleDays.exe，保留 _internal；不需 Python、原始碼、指令或雲端網站。
 
-1. 登入擁有此私人儲存庫權限的 GitHub 帳號。
-2. 開啟 [Windows 試用包](downloads/OurLittleDays-Windows-x64-Phase1-preview.zip)。
-3. GitHub 無法預覽 ZIP 是正常的。在檔案頁面右上角按下載箭頭（Download raw file）；若看到 `Raw` 或 `View raw`，也可以按它取得檔案。
-4. 在 Windows「檔案總管」找到下載的 ZIP，按右鍵「全部解壓縮」。
-5. 打開解壓縮後的 `OurLittleDays` 資料夾，雙擊 `OurLittleDays.exe`。
+[新手啟動與 API 設定](docs/WINDOWS_USER_GUIDE.md) · [Windows 實測清單](docs/WINDOWS_TEST_CHECKLIST.md) · [Phase 2/3 設計與費用界線](docs/PHASE2_3.md)
 
-保留整個資料夾，包括 `_internal`。請建立桌面捷徑，勿單獨搬走 `.exe`。
+使用者已確認 Phase 1 在 Windows 11 開啟與 Chrome 指定擷取成功。**新版尚待 Windows 實機與正式 API 成本驗收**；封裝使用 Windows Python / PyInstaller 在 Linux + Wine 建置，不假稱原生 Windows 測試通過。原 Phase 1 ZIP 保留於 downloads。
 
-## 驗證範圍
+## 本次功能
 
-已完成 Windows x64 `.exe` 建置及 Linux＋Wine 相容環境中的離線封裝檢查。真正 Windows 電腦上的啟動、指定視窗擷取與人工操作驗收尚未完成。本版不會自主聊天或呼叫模型 API，角色訊息會標示為測試。
+- 沿用桌面、主題、十三名單、Win32 指定視窗擷取與 SQLite 永久資料。
+- 預設 gpt-4.1-mini 圖片理解；Windows DPAPI 金鑰加密，本機明確啟用後才付費。
+- NT$500 月預算、集中預留／結算、每日／每月用量、剩餘預算與待確認費用。估算與平台實際帳單分開。
+- 六秒擷取不等於 API 排程；明顯且穩定的新畫面才分析，最短 120 秒間隔，只是限速。靜態畫面可一直安靜。
+- 每次完整十三份原始人格進入同一請求，0–4 人自然回應，支援彼此接話與 SQLite 回覆關聯。
+- 外語發言／敘事逐段附繁中翻譯；世界線隔離、事件持久化，不擅改人格、未知欄位或戀愛關係。
+- 必須先完成單次畫面／單次角色的真實用量測試，才能手動啟用文字 AI 與自主陪伴。
+- 關閉／暫停／異常恢復、完整聊天備份與用量合併還原。沒有付費自動摘要或自動重試。
 
-- 檔案大小：47,672,210 bytes（約 46 MB）。
-- SHA-256：`deaff1ad5a83e9ac35a13b1aae2f1841d7fd88b7e82d72da1932437849328ac8`。
-- [完整 Windows 操作說明](downloads/WINDOWS_USER_GUIDE.md)
-- [Windows 實測紀錄表](downloads/WINDOWS_TEST_CHECKLIST.md)
+模型參考價格與匯率未即時核對，設定中要求確認。預算是本機依設定價格估算的上限，不是平台實際帳單硬上限。PrintWindow 仍不保證所有遊戲／影片可擷取；WGC 與自主品質改善留待後續。讀取長期記憶與重要事件，近期聊天最多 60 則；不刪減人格。
 
-聊天與角色資料會儲存於 Windows 使用者的本機資料目錄；GitHub 只用來下載程式，執行與保存均在本機。
+## 開發環境（一般使用者不需做）
+
+Python 3.11–3.13，建議 3.12。依賴固定於 uv.lock / requirements-lock.txt。Windows：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements-lock.txt
+.\.venv\Scripts\python.exe -m pip install --no-deps --no-build-isolation -e .
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m our_little_days
+```
+
+Linux 開發（不能真實擷取 Windows，不能安全保存 Key；測試不呼叫 API）：
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r requirements-lock.txt
+.venv/bin/python -m pip install --no-deps --no-build-isolation -e .
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q
+QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/smoke_ui.py
+```
+
+已有的雲端環境仅用於開發／測試，不是產品部署。使用隔離工作目錄，不需建立新 worktree。原生擷取與 DPAPI 測試需 Windows；模擬 API 測試不證明真正模型品質。
+
+Windows 打包：開發者雙擊「製作Windows執行檔.cmd」，或在 Windows x64 Python 跑 scripts/build_windows.py。產物：artifacts/OurLittleDays-Windows-x64-Phase2-3-preview.zip。
+
+正式原始角色與稽核：[角色匯入](docs/CHARACTER_IMPORT.md)、[完整性修復](docs/CHARACTER_REPAIR_CHECK.md)、[已確認補充](docs/CHARACTER_UPDATES.md)。十三 source_text 保留，種子只初始化；唯一已授權資料補充是序調戲／♡，合併前備份。SQLite 設計：[PERSISTENCE.md](docs/PERSISTENCE.md)。
