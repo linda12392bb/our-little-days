@@ -40,7 +40,7 @@ MESSAGE = _obj({'speaker_id': {'type': 'string'}, 'recipient_ids': {'type': 'arr
 SCHEMA = _obj({'meaningful': {'type': 'boolean'}, 'event_key': {'type': 'string'}, 'summary': {'type': 'string'}, 'important': {'type': 'boolean'}, 'messages': {'type': 'array', 'items': MESSAGE}})
 
 
-def response_schema(characters, kind, selected, exposed_ids):
+def response_schema(characters, kind, selected, exposed_speakers):
     """Constrain identifiers before generation, rather than rejecting paid guesses."""
     ids = [c.id for c in characters]
     if kind == 'reply_test' and selected not in ids:
@@ -57,8 +57,7 @@ def response_schema(characters, kind, selected, exposed_ids):
     fields['segments'].update(minItems=1, maxItems=8)
     fields['segments']['items']['properties']['text'].update(minLength=1, maxLength=2000)
     fields['segments']['items']['properties']['translation']['maxLength'] = 3000
-    fields['reply_to_message_id'] = ({'type': ['integer', 'null'], 'enum': [None, *sorted(exposed_ids)]}
-                                     if exposed_ids else {'type': 'null'})
+    fields['reply_to_message_id'] = {'type': 'null'}
     if kind == 'reply_test':
         messages.update(minItems=1, maxItems=1)
         fields['recipient_ids'].update(minItems=1, maxItems=1)
@@ -66,6 +65,25 @@ def response_schema(characters, kind, selected, exposed_ids):
         fields['reply_to_index'] = fields['reply_to_message_id'] = {'type': 'null'}
     elif kind == 'screen_test':
         messages['maxItems'] = 0
+    elif kind == 'user_reply':
+        # The user's current input is already known locally. Do not ask the
+        # model to reconstruct its database ID or accidentally point elsewhere.
+        messages['minItems'] = 1
+    elif exposed_speakers:
+        variants = [deepcopy(messages['items'])]
+        for speaker in ['user', *ids]:
+            previous_ids = sorted(key for key, author in exposed_speakers.items() if author == speaker)
+            if not previous_ids:
+                continue
+            variant = deepcopy(messages['items'])
+            props = variant['properties']
+            props['reply_to_message_id'] = {'type': 'integer', 'enum': previous_ids}
+            props['recipient_ids'] = {'type': 'array', 'minItems': 1, 'maxItems': 1,
+                                      'items': {'type': 'string', 'enum': [speaker]}}
+            variants.append(variant)
+        # An ID and its author must be chosen together, rather than from two
+        # unrelated enums that allow a paid but invalid recipient combination.
+        messages['items'] = {'anyOf': variants}
     if kind in {'quiet_chat', 'quiet_test'}:
         schema['properties']['event_key']['enum'] = ['']
         schema['properties']['summary']['enum'] = ['']
@@ -116,8 +134,12 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
     instructions += '\nspeaker_id 與 recipient_ids 只能填 characters 中的 id 原值；使用者 ID 固定 user，不填顯示名稱、圖示或月鹿。未接續某則訊息時兩個 reply_to 欄位都填 null，不猜測訊息 ID。日文角色的每一段發言與敘事均用自然日文（含假名）並提供繁體中文翻譯。'
     if kind == 'reply_test':
         instructions += f'\n本次只由 id={selected} 回覆測試問題，recipient_ids=["user"]，兩個 reply_to 欄位都為 null。只需一至兩句，不添加無關敘事。'
-    exposed_ids = {row['id'] for row in recent} | {row['id'] for row in ongoing['anchor_messages']}
-    schema = response_schema(characters, kind, selected, exposed_ids)
+    elif kind == 'user_reply':
+        instructions += '\n本次是使用者主動說話，至少一則自然回覆當下輸入。第一則 recipient_ids=["user"]，後續可住戶互相接話；所有訊息的兩個 reply_to 欄位都為 null，本機會連結當前使用者訊息及同批接話，不要填歷史訊息 ID。'
+    else:
+        instructions += '\n引用先前訊息時，reply_to_message_id 與 recipient_ids 必須使用 schema 同一分支：對象只填該訊息真正說話者的 ID。新開話題或同批接話則 reply_to_message_id=null，切勿把歷史 ID 搭配另一位角色。'
+    exposed_speakers = {row['id']: row['speaker_id'] for row in [*recent, *ongoing['anchor_messages']]}
+    schema = response_schema(characters, kind, selected, exposed_speakers)
     payload = {'model': config.model, 'messages': [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': content}],
                'max_completion_tokens': config.max_output_tokens,
                'response_format': {'type': 'json_schema', 'json_schema': {'name': 'apartment_turn', 'strict': True, 'schema': schema}}}
@@ -150,7 +172,7 @@ def validate_turn(response, characters, kind, selected=None, store=None, worldli
         messages = value['messages']
         if kind in {'quiet_chat', 'quiet_test'} and (value['important'] or value['event_key'] or value['summary']):
             invalid('安靜聊天不得新增事件或重要記憶')
-        if not isinstance(messages, list) or len(messages) > 4 or (kind == 'screen_test' and messages) or (kind == 'reply_test' and len(messages) != 1):
+        if not isinstance(messages, list) or len(messages) > 4 or (kind == 'screen_test' and messages) or (kind == 'reply_test' and len(messages) != 1) or (kind == 'user_reply' and not messages):
             invalid('角色訊息數量不符合此測試要求')
         ids = {c.id: c for c in characters}
         for index, m in enumerate(messages):
@@ -167,13 +189,17 @@ def validate_turn(response, characters, kind, selected=None, store=None, worldli
             if reply is not None and (type(reply) is not int or not 0 <= reply < index or messages[reply]['speaker_id'] not in m['recipient_ids']):
                 invalid(f'第 {index+1} 則訊息的同批接話參照無效')
             previous = m.get('reply_to_message_id')
+            if kind == 'user_reply' and (previous is not None or reply is not None):
+                invalid(f'第 {index+1} 則訊息必須由本機連結目前使用者輸入，不引用歷史 ID')
             if previous is not None:
                 if type(previous) is not int or reply is not None or store is None:
                     invalid(f'第 {index+1} 則訊息的跨批接話格式無效')
                 allowed = {row['id']: row for row in store.messages(worldline) if row['source_kind'] not in {'test', 'system'}}
                 exposed = set(list(allowed)[-60:]) | set(store.conversation_state(worldline).get('anchor_ids', []))
-                if previous not in exposed or previous not in allowed or allowed[previous]['speaker_id'] not in m['recipient_ids']:
+                if previous not in exposed or previous not in allowed:
                     invalid(f'第 {index+1} 則訊息引用未提供或不同世界線的對話')
+                if allowed[previous]['speaker_id'] not in m['recipient_ids']:
+                    invalid(f'第 {index+1} 則訊息的跨批接話對象與引用訊息說話者不一致')
             if not isinstance(m['segments'], list) or not 1 <= len(m['segments']) <= 8:
                 invalid(f'第 {index+1} 則訊息的發言或敘事段落數量無效')
             for seg in m['segments']:

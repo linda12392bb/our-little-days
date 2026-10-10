@@ -240,6 +240,11 @@ class AIController(QObject):
                 raise AIError('請先在本機 API 設定同意傳送所需資料並核對價格。')
             key = self.keys.read()
             worldline = self.window.worldline
+            if kind == 'user_reply' and current_input is None:
+                row = self.window.store.connection.execute("SELECT id,text,source_kind FROM messages WHERE worldline_id=? AND speaker_id='user' AND source_kind IN ('user','voice') ORDER BY id DESC LIMIT 1", (worldline,)).fetchone()
+                if row:
+                    user_message_id = row['id']
+                    current_input = {'kind': 'voice_transcript' if row['source_kind'] == 'voice' else 'typed_text', 'text': row['text'], 'saved': True}
             characters = self.window.store.load_characters()
             selected = self.window.character_combo.currentData().id if kind == 'reply_test' else None
             if image is None and kind == 'screen_test':

@@ -39,12 +39,25 @@ def _check_manual_buttons(window):
     calls, warnings, successes = [], [], []
     def fake(key, payload, cancelled):
         calls.append(payload)
-        kind = json.loads(payload['messages'][1]['content'][0]['text'])['task']
+        context = json.loads(payload['messages'][1]['content'][0]['text'])
+        kind = context['task']
         schema = payload['response_format']['json_schema']['schema']['properties']['messages']
-        assert schema['items']['properties']['reply_to_index'] == {'type':'null'}
+        item = schema['items']
+        variants = item.get('anyOf', [item])
+        assert all(variant['properties']['reply_to_index'] == {'type':'null'} for variant in variants)
         if kind == 'reply_test':
             assert schema['items']['properties']['speaker_id']['enum'] == ['order']
             assert schema['minItems'] == schema['maxItems'] == 1
+        if kind == 'user_reply':
+            assert schema['minItems'] == 1 and item['properties']['reply_to_message_id'] == {'type':'null'}
+            assert context['current_user_input'] == {'kind':'typed_text','text':'晚安','saved':True}
+        for variant in variants[1:]:
+            props = variant['properties']
+            authors = props['recipient_ids']['items']['enum']
+            assert len(authors) == 1
+            exposed = {row['id']:row for row in [*context['recent_chat'], *context['ongoing_conversation']['anchor_messages']]}
+            for message_id in props['reply_to_message_id']['enum']:
+                assert exposed[message_id]['speaker_id'] == authors[0]
         value = {'meaningful': True, 'event_key': '', 'summary': '', 'important': False,
                  'messages':[{'speaker_id':'序' if len(calls) == 1 else 'order',
                               'recipient_ids':['user'], 'reply_to_index':None, 'reply_to_message_id':None,
@@ -94,11 +107,22 @@ def _check_manual_buttons(window):
         deadline = time.monotonic()+10
         while c.worker is not None and time.monotonic() < deadline:
             QTest.qWait(10)
-        assert c.worker is None and len(calls) == 3 and len(successes) == 2 and len(warnings) == 1
+        assert c.worker is None and len(calls) == 3 and len(successes) == 2 and len(warnings) == 1, (len(calls), successes, warnings)
         records = window.store.messages()[-3:]
         assert records[0]['reply_to'] is None and records[1]['reply_to'] == records[0]['id']
         assert records[2]['reply_to'] == records[1]['id']
         assert abs(c.ledger.quiet_today()-.226288) < 1e-9 and not c.quiet_enabled
+        c.quiet_enabled = True
+        c.refresh()
+        window.chat_input.setPlainText('晚安')
+        QTest.mouseClick(window.send_button, Qt.MouseButton.LeftButton)
+        deadline = time.monotonic()+10
+        while c.worker is not None and time.monotonic() < deadline:
+            QTest.qWait(10)
+        assert c.worker is None and len(calls) == 4
+        records = window.store.messages()[-2:]
+        assert records[0]['speaker_id'] == 'user' and records[1]['reply_to'] == records[0]['id']
+        assert c.enabled and c.quiet_enabled and len(warnings) == 1
     finally:
         (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
          c.keys.read, c.keys.exists, c.config) = saved
@@ -192,6 +216,7 @@ def check_package(speech_test_dir=None):
             _check_manual_buttons(window)
             checks.append('frozen manual reply button works while AI paused; strict selected ID schema, safe failure dialog with settled usage and success dialog verified with mock provider, no network or retry')
             checks.append('frozen quiet_test button creates light-to-order-to-reo peer replies in one mock request; null model indexes resolved locally to prior explicit recipients and persisted; scheduler remains OFF')
+            checks.append('frozen send button replies immediately to pinned typed input while quiet mode remains ON; history-ID schema couples each ID with its true speaker, no network')
             continuity = store.conversation_state('main')
             messages = store.messages()
             checks.append('quiet chat defaults OFF; 3-minute local check, 2000 shared output cap, NT$10 daily cap and persistent cross-batch peer replies verified with synthetic data, no API')

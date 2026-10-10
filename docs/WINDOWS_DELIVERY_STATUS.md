@@ -1,5 +1,17 @@
 # Windows 試用包交付與驗證
 
+## 輸入後停用／跨批對象配對修正 0.4.3
+
+- 下載：[Windows 自主陪伴 0.4.3](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.3-preview.zip)，私人 GitHub 檔案頁按 View raw。原八個 ZIP 均保留。
+- 大小：59,094,212 bytes；SHA-256：`f71a5ea33cc0f384d716e37deb9edd0f1a9bfc36c1e7fbd17d37540b14c2a2d9`。
+- EXE SHA-256：`588d4c63f6ec35cc93a4c64f31f6f81dde4ad8a83b016802e0e57e9fb8bc74e7`。
+- 使用者 0.4.2 實機截圖確認輸入「晚安」後出現「引用未提供或不同世界線的對話」，AI 選項停用。該舊提示也涵蓋同世界線 ID 與 recipient_ids 不相配，不能據此宣稱真的跨了 AU；未保留該次原始 AI 回應，無法進一步斷言是哪個組合。原 schema 讓真實 ID 與對象分別獨立選擇，可生成不合法配對。
+- 一般文字／語音回覆由本機固定連到本次使用者訊息，不要求模型重建 SQLite ID，兩個模型參照欄位均為 null。請求開始時固定訊息編號與 current_user_input，途中再打字不會把已在生成的回覆錯連到較晚輸入。一般使用者輸入至少一則回覆，安靜模式仍可空批次。
+- 安靜／畫面事件回接歷史：anyOf 分支把提供的真實同世界線 ID 與其原發言者一起約束，跨批角色互相接話仍保留，同批對象本機連結。驗證仍拒絕 AU 混用／對象不相配／缺翻譯，不容忍錯誤，不自行改寫回覆，不自動重試。
+- 十三份原始角色檔與 0.4.2 逐位元組一致；原 SQLite、人格／關係／記憶、用量、金鑰、模型、成本測試標記與使用者自訂日額／冷卻均沿用。所有請求仍共用月預算，沒有付款或加值操作。已成功的兩項成本測試不用重做：更新後勾文字 AI，在一般聊天送一次訊息。安靜模式可以保持勾選，程式優先處理輸入。
+- 全套 **153 passed、2 Windows-only skipped**；十三人格稽核、Qt 介面與依賴檢查通過。新增測試包含文字／語音 null 參照、歷史 ID 與原發言者配對、拒絕錯配且保留原資料、安靜開著時實際送出按鈕立即回覆、途中再輸入後兩批分別連到正確訊息、每批單次請求且開關保持勾選。
+- frozen Windows EXE Linux + Wine 封裝檢查通過，含真正點擊送出按鈕、兩項已通過成本標記沿用、安靜開著仍立即回覆／保存；官方 wheel／Whisper 二進位來源、DPAPI 測試金鑰、SQLite 備份／重開及公開 tiny 語音參考檢查亦通過。API 使用模擬回應，**未執行 0.4.3 Windows 實機或正式付費模型驗收**。
+
 ## 同批接話修正 0.4.2
 
 - 下載：[Windows 自主陪伴 0.4.2](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.2-preview.zip)，登入私人 GitHub，按 View raw。原七個 ZIP 保留。

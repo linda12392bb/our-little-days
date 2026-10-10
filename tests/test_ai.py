@@ -225,6 +225,11 @@ def setup_fake(window, monkeypatch):
             value['messages'][0]['recipient_ids'] = ['user']
             value['messages'][0]['reply_to_index'] = None
             value['messages'][0]['reply_to_message_id'] = None
+        if context['task'] == 'user_reply':
+            value['messages'][0]['recipient_ids'] = ['user']
+            value['messages'][1]['recipient_ids'] = ['order']
+            for message in value['messages']:
+                message['reply_to_index'] = message['reply_to_message_id'] = None
         return response(value)
     monkeypatch.setattr(ai_ui, 'request_api', fake)
     return calls
@@ -248,11 +253,15 @@ def test_request_schema_constrains_selected_character_and_real_reply_ids(store):
     main = store.append_message(speaker_id='user', speaker_name='月鹿', text='原始對話')
     foreign = store.append_message(speaker_id='user', speaker_name='月鹿', text='其他世界線', worldline='glasshouse')
     test = store.append_message(speaker_id='order', speaker_name='序', text='介面測試', source_kind='test')
-    payload, _ = build_payload(AIConfig(), characters, store, 'main', 'user_reply')
-    fields = payload['response_format']['json_schema']['schema']['properties']['messages']['items']['properties']
+    payload, _ = build_payload(AIConfig(), characters, store, 'main', 'quiet_chat')
+    variants = payload['response_format']['json_schema']['schema']['properties']['messages']['items']['anyOf']
+    fields = variants[0]['properties']
+    historical = variants[1]['properties']
     assert set(fields['speaker_id']['enum']) == {c.id for c in characters}
-    assert fields['reply_to_message_id']['enum'] == [None, main['id']]
-    assert foreign['id'] not in fields['reply_to_message_id']['enum'] and test['id'] not in fields['reply_to_message_id']['enum']
+    assert fields['reply_to_message_id'] == {'type':'null'}
+    assert historical['reply_to_message_id']['enum'] == [main['id']]
+    assert historical['recipient_ids']['items']['enum'] == ['user']
+    assert foreign['id'] not in historical['reply_to_message_id']['enum'] and test['id'] not in historical['reply_to_message_id']['enum']
     assert [asdict(c) for c in store.load_characters()] == before
 
 
@@ -530,5 +539,98 @@ def test_failed_key_rotation_still_invalidates_old_cost_tests(app, store, monkey
         assert not c.enabled
         dialog.close()
     finally:
+        window.close()
+        app.processEvents()
+
+
+def test_user_reply_schema_uses_local_references_and_requires_a_reply(store):
+    profiles = store.load_characters()
+    store.append_message(speaker_id='order', speaker_name='序', text='ほんま♡')
+    for input_kind in ('typed_text', 'voice_transcript'):
+        current = {'kind':input_kind, 'text':'晚安', 'saved':False}
+        payload, _ = build_payload(AIConfig(), profiles, store, 'main', 'user_reply', current_input=current)
+        schema = payload['response_format']['json_schema']['schema']['properties']['messages']
+        assert schema['minItems'] == 1
+        fields = schema['items']['properties']
+        assert fields['reply_to_index'] == fields['reply_to_message_id'] == {'type':'null'}
+        context = json.loads(payload['messages'][1]['content'][0]['text'])
+        assert context['current_user_input'] == current and len(context['characters']) == 13
+    empty = turn()
+    empty['messages'] = []
+    with pytest.raises(AIError, match='訊息數量'):
+        validate_turn(response(empty), profiles, 'user_reply', store=store)
+
+
+def test_historical_reference_schema_couples_ids_to_actual_speakers(store):
+    profiles = store.load_characters()
+    a = store.append_message(speaker_id='light', speaker_name='光', text='序，換你接話')
+    b = store.append_message(speaker_id='order', speaker_name='序', text='ほんま♡')
+    foreign = store.append_message(speaker_id='light', speaker_name='光', text='AU', worldline='glasshouse')
+    payload, _ = build_payload(AIConfig(), profiles, store, 'main', 'quiet_chat')
+    branches = payload['response_format']['json_schema']['schema']['properties']['messages']['items']['anyOf']
+    pairs = {}
+    for branch in branches[1:]:
+        fields = branch['properties']
+        assert fields['recipient_ids']['minItems'] == fields['recipient_ids']['maxItems'] == 1
+        author, = fields['recipient_ids']['items']['enum']
+        pairs.update({message_id:author for message_id in fields['reply_to_message_id']['enum']})
+    assert pairs == {a['id']:'light', b['id']:'order'} and foreign['id'] not in pairs
+    value = turn()
+    value.update(meaningful=False, event_key='', summary='', important=False)
+    value['messages'] = [value['messages'][0]]
+    value['messages'][0].update(recipient_ids=['light'], reply_to_message_id=b['id'])
+    before = store.messages()
+    with pytest.raises(AIError, match='說話者不一致'):
+        validate_turn(response(value), profiles, 'quiet_chat', store=store)
+    assert store.messages() == before
+    value['messages'][0]['reply_to_message_id'] = a['id']
+    valid = validate_turn(response(value), profiles, 'quiet_chat', store=store)
+    assert save_turn(store, 'main', valid, profiles, 'quiet_chat')[0]['reply_to'] == a['id']
+
+
+def test_typing_while_quiet_enabled_pins_current_input_during_inflight_request(app, store, monkeypatch):
+    import our_little_days.ai_ui as ai_ui
+    import threading
+    window = MainWindow(UnsupportedBackend(), store.load_characters(), store)
+    release = threading.Event()
+    try:
+        calls = setup_fake(window, monkeypatch)
+        c = window.ai
+        for kind in ('screen_test', 'reply_test'):
+            rid, _ = c.ledger.reserve(c.config, kind, 100)
+            c.ledger.settle(rid, {'prompt_tokens':100,'completion_tokens':100}, 'mock')
+            c.ledger.mark_test(c.config, kind, rid)
+        c.enable(True)
+        c.quiet_enabled = True
+        c.refresh()
+        def delayed(key, payload, cancelled):
+            calls.append(payload)
+            release.wait(3)
+            value = turn()
+            value['messages'][0]['recipient_ids'] = ['user']
+            value['messages'][1]['recipient_ids'] = ['order']
+            for message in value['messages']:
+                message['reply_to_index'] = message['reply_to_message_id'] = None
+            return response(value)
+        monkeypatch.setattr(ai_ui, 'request_api', delayed)
+        window.chat_input.setPlainText('晚安')
+        QTest.mouseClick(window.send_button, Qt.MouseButton.LeftButton)
+        first_id = store.messages()[-1]['id']
+        wait(lambda: len(calls) == 1)
+        window.chat_input.setPlainText('我還在')
+        QTest.mouseClick(window.send_button, Qt.MouseButton.LeftButton)
+        second_id = store.messages()[-1]['id']
+        assert first_id != second_id
+        release.set()
+        wait(lambda: len(calls) == 2 and c.worker is None)
+        replies = [row for row in store.messages() if row['source_kind'] == 'ai']
+        assert replies[0]['reply_to'] == first_id and replies[2]['reply_to'] == second_id
+        assert replies[1]['reply_to'] == replies[0]['id'] and replies[3]['reply_to'] == replies[2]['id']
+        inputs = [json.loads(p['messages'][1]['content'][0]['text'])['current_user_input'] for p in calls]
+        assert inputs == [{'kind':'typed_text','text':text,'saved':True} for text in ('晚安', '我還在')]
+        assert c.enabled and c.quiet_enabled and window.ai_enable.isChecked() and window.ai_quiet.isChecked()
+        assert c.ledger.tests_passed(c.config)
+    finally:
+        release.set()
         window.close()
         app.processEvents()
