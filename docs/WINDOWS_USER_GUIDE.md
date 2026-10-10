@@ -1,4 +1,4 @@
-# Windows 安裝與啟動：自動語音輸入試用版 0.3.1
+# Windows 安裝與啟動：自動語音輸入試用版 0.3.2
 
 這是 Windows 本機桌面程式。ZIP 已含 OurLittleDays.exe 與全部執行檔，**不用安裝 Python、不用下載原始碼、不用輸入指令、不用部署雲端網站**。支援 Windows 10/11 Intel / AMD 64 位元。
 
@@ -6,7 +6,7 @@
 
 1. 先在舊版按「記憶、事件與備份」→「備份整間公寓…」，將備份存到文件資料夾。關閉舊公寓視窗。
 2. 登入自己的 GitHub 帳號，開啟私人儲存庫的下載頁：
-   https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Voice-0.3.1-preview.zip
+   https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Voice-0.3.2-preview.zip
 3. 按檔案中間藍色 **View raw**，或右上方向下箭頭，下載 ZIP。這是下載，不需要預覽。不要按「Code → Download ZIP」，那是原始碼。
 4. 到電腦「下載」資料夾，對 ZIP 按右鍵 →「全部解壓縮」。選新資料夾，例如「文件\OurLittleDays-Voice」。等待完成。
 5. 打開解壓後的 OurLittleDays 資料夾，雙擊 OurLittleDays.exe。不要把 .exe 單獨搬出；同層的 _internal 與 speech-runtime 必須保留。

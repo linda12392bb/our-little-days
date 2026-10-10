@@ -222,7 +222,7 @@ def normalize_text(text):
     return ''.join(part if re.search('[ぁ-ゖァ-ヺ]', part) else converter.convert(part) for part in re.split(r'([，。！？、\n])', text)).strip()
 
 
-def recognize_in_memory(command, pcm, cancelled, *, cwd=None, env=None, timeout=90):
+def recognize_in_memory(command, pcm, cancelled, *, cwd=None, env=None, timeout=90, progress=None):
     """Feed a WAV through stdin, cancellably; never create an audio file."""
     if cancelled():
         raise SpeechError('離線辨識已取消。')
@@ -248,13 +248,15 @@ def recognize_in_memory(command, pcm, cancelled, *, cwd=None, env=None, timeout=
     thread.start()
     deadline = time.monotonic()+timeout
     try:
+        if progress:
+            progress('Whisper 載入模型／辨識中')
         while not completed.wait(.05):
             if cancelled() or time.monotonic() >= deadline:
                 raise SpeechError('離線辨識已取消或逾時；音訊不保存。')
         if cancelled():
             raise SpeechError('離線辨識已取消。')
         if process.returncode != 0 or 'data' not in result:
-            raise SpeechError('離線辨識失敗；請檢查模型與 CPU 相容性。')
+            raise SpeechError(f'離線辨識失敗（退出碼 {process.returncode}）；請檢查模型與 CPU 相容性。')
         text = result['data'][0].decode('utf-8', errors='replace').strip()
         if len(text) > 4000:
             raise SpeechError('辨識文字過長，請分句。')
@@ -271,12 +273,22 @@ def recognize_in_memory(command, pcm, cancelled, *, cwd=None, env=None, timeout=
         audio.close()
 
 
+def whisper_command(folder, path, config):
+    # v1.8.2 defaults output basename to the input "-", which disables the
+    # transcript callback for stdin. A non-"-" basename restores stdout text.
+    # No --output-* format is enabled, so this creates no transcript/audio file.
+    return [str(Path(folder)/'whisper-cli.exe'), '-m', str(path), '-f', '-',
+            '-of', 'stdout-transcript', '-l', config.language,
+            '-t', str(max(1, min(4, os.cpu_count() or 2))), '-nt', '-np', '-ng',
+            '--suppress-nst', '--prompt', '繁體中文、日本語。']
+
+
 class WhisperRecognizer:
     def __init__(self, directory):
         self.directory = directory
         self.verified = None
 
-    def transcribe(self, pcm, config, cancelled):
+    def transcribe(self, pcm, config, cancelled, progress=None):
         config.validate()
         if sys.platform != 'win32':
             raise SpeechError('此試用版的離線 Whisper 執行檔限 Windows x64。')
@@ -286,6 +298,8 @@ class WhisperRecognizer:
         except OSError:
             raise SpeechError('請先下載離線多語模型。') from None
         if stamp != self.verified:
+            if progress:
+                progress('驗證離線模型完整性')
             verify_model(path, config.model, cancelled)
             self.verified = stamp
         folder = runtime_folder()
@@ -295,6 +309,6 @@ class WhisperRecognizer:
                 raise SpeechError('離線辨識執行檔完整性檢查失敗。')
         env = os.environ.copy()
         env['PATH'] = str(folder)+os.pathsep+str(Path(sys.executable).parent/'_internal')+os.pathsep+env.get('PATH','')
-        command = [str(folder/'whisper-cli.exe'), '-m', str(path), '-f', '-', '-l', config.language,
-                   '-t', '2', '-nt', '-np', '-ng', '--suppress-nst', '--prompt', '繁體中文、日本語。']
-        return recognize_in_memory(command, pcm, cancelled, cwd=folder, env=env)
+        command = whisper_command(folder, path, config)
+        return recognize_in_memory(command, pcm, cancelled, cwd=folder, env=env,
+                                   timeout=180 if config.model == 'small' else 90, progress=progress)

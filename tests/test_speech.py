@@ -6,6 +6,7 @@ from pathlib import Path
 import struct
 import sys
 import time
+import threading
 
 import pytest
 from PySide6.QtGui import QImage, QColor
@@ -14,7 +15,7 @@ from PySide6.QtCore import QObject, Signal, QBuffer, QIODevice, QByteArray
 from PySide6.QtMultimedia import QAudioFormat, QtAudio
 
 from our_little_days.speech import (FRAME_BYTES, PCMConverter, SpeechError, VoiceConfig, VoiceSegmenter,
-    amplify, download_model, is_microphone_name, normalize_text, recognize_in_memory, rms_db, verify_model)
+    amplify, download_model, is_microphone_name, normalize_text, recognize_in_memory, rms_db, verify_model, whisper_command)
 from our_little_days.capture import UnsupportedBackend
 from our_little_days.ui import MainWindow
 
@@ -135,6 +136,28 @@ def test_cancel_stops_real_child_even_while_stdin_is_blocked(tmp_path):
 def test_offline_child_failure_does_not_surface_or_log_audio(tmp_path):
     with pytest.raises(SpeechError,match='辨識失敗'):
         recognize_in_memory([sys.executable,'-c','import sys; sys.exit(1)'],tone()*3,lambda:False,cwd=tmp_path)
+    assert not list(tmp_path.iterdir())
+
+
+def test_vendor_stdin_output_contract_returns_text_without_output_files(tmp_path):
+    args=whisper_command(tmp_path,tmp_path/'model.bin',VoiceConfig())[1:]
+    assert args[args.index('-f')+1]=='-'
+    assert args[args.index('-of')+1]!='-'
+    assert not any(arg in {'-otxt','-oj','-ojf','-osrt','-ovtt','-ocsv','-olrc','-owts'} or arg.startswith('--output-') for arg in args)
+    # Simulate v1.8.2's external stdin/basename contract; the old command emits
+    # no text despite exit=0. No weights or microphone are involved in this test.
+    script="import sys; a=sys.argv[1:]; sys.stdin.buffer.read(); inp=a[a.index('-f')+1]; out=a[a.index('-of')+1] if '-of' in a else inp; sys.stdout.buffer.write('蛤？何これ？'.encode() if out!='-' else b'')"
+    command=[sys.executable,'-c',script,*args]
+    assert recognize_in_memory(command,tone()*3,lambda:False,cwd=tmp_path)=='蛤？何これ？'
+    assert not list(tmp_path.iterdir())
+
+
+def test_child_start_progress_and_timeout_release_memory(tmp_path):
+    stages=[]
+    with pytest.raises(SpeechError,match='逾時'):
+        recognize_in_memory([sys.executable,'-c','import time; time.sleep(20)'],tone()*3,lambda:False,
+            cwd=tmp_path,timeout=.15,progress=stages.append)
+    assert stages==['Whisper 載入模型／辨識中']
     assert not list(tmp_path.iterdir())
 
 
@@ -323,7 +346,7 @@ def test_rejected_retry_does_not_duplicate_saved_voice_message(voice_window,stor
 def test_automatic_segment_recognition_preview_without_pressing_keys(voice_window,store,monkeypatch):
     w=voice_window;c=w.voice
     seen=[]
-    def transcribe(pcm,config,cancelled):
+    def transcribe(pcm,config,cancelled,progress=None):
         seen.append(pcm)
         return '蛤？何これ？'
     monkeypatch.setattr(c.recognizer,'transcribe',transcribe)
@@ -337,6 +360,37 @@ def test_automatic_segment_recognition_preview_without_pressing_keys(voice_windo
         assert not c.send_timer.isActive() and w.ai.ledger.totals()['month']['requests']==0
         assert not list(store.path.parent.rglob('*.wav'))
     finally:
+        c.source=None
+
+
+def test_slow_recognition_elapsed_preview_and_queue_overflow_preserve_current_job(voice_window,store,monkeypatch):
+    w=voice_window;c=w.voice
+    released=threading.Event()
+    def transcribe(pcm,config,cancelled,progress=None):
+        progress('Whisper 載入模型／辨識中')
+        released.wait(3)
+        return '不是吧？'
+    monkeypatch.setattr(c.recognizer,'transcribe',transcribe)
+    c.source=object()
+    try:
+        c.enqueue(tone()*3)
+        wait(lambda:'Whisper 載入模型' in w.voice_note.text())
+        c.recognition_started-=21
+        for _ in range(5):c.enqueue(tone()*3)
+        c.recognition_tick()
+        assert len(c.queue)==3 and c.dropped_segments==2
+        assert c.source is not None and not c.worker.isInterruptionRequested()
+        assert '已等待 21 秒' in w.voice_note.text()
+        assert '已略過 2 段' in w.voice_note.text()
+        c.queue.clear()
+        released.set()
+        wait(lambda:c.worker is None)
+        assert w.voice_preview.toPlainText()=='不是吧？'
+        assert not c.recognition_timer.isActive()
+        assert w.ai.ledger.totals()['month']['requests']==0
+    finally:
+        released.set()
+        if c.worker:c.worker.wait()
         c.source=None
 
 

@@ -2,6 +2,7 @@
 from dataclasses import asdict
 import json
 import sys
+import time
 from collections import deque
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
@@ -23,6 +24,7 @@ def load_voice_config(store):
 class RecognitionTask(QThread):
     recognized = Signal(str, int)
     failed = Signal(str, int)
+    progress = Signal(str, int)
 
     def __init__(self, recognizer, pcm, config, generation, parent):
         super().__init__(parent)
@@ -30,7 +32,8 @@ class RecognitionTask(QThread):
 
     def run(self):
         try:
-            self.recognized.emit(self.recognizer.transcribe(self.pcm, self.config, self.isInterruptionRequested), self.generation)
+            self.recognized.emit(self.recognizer.transcribe(self.pcm, self.config, self.isInterruptionRequested,
+                progress=lambda stage: self.progress.emit(stage, self.generation)), self.generation)
         except Exception as exc:
             self.failed.emit(str(exc) if isinstance(exc, SpeechError) else '離線辨識失敗；未保存或上傳原始音訊。', self.generation)
         finally:
@@ -75,6 +78,12 @@ class VoiceController(QObject):
         self.send_timer.setSingleShot(True)
         self.send_timer.setInterval(2500)
         self.send_timer.timeout.connect(self.deliver_preview)
+        self.recognition_timer = QTimer(self)
+        self.recognition_timer.setInterval(1000)
+        self.recognition_timer.timeout.connect(self.recognition_tick)
+        self.recognition_phase = ''
+        self.recognition_started = 0
+        self.dropped_segments = 0
         self.refresh_devices()
         self.refresh()
 
@@ -194,7 +203,7 @@ class VoiceController(QObject):
             return
         try:
             # Draining bounded chunks prevents one huge allocation after a UI delay.
-            while self.input.bytesAvailable() > 0 and self.source:
+            while self.source and self.input and self.input.bytesAvailable() > 0:
                 raw = bytes(self.input.read(min(32768, self.input.bytesAvailable())))
                 if not raw:
                     break
@@ -203,8 +212,13 @@ class VoiceController(QObject):
                     continue
                 level = rms_db(pcm)
                 self.window.voice_level.setValue(round(max(0, min(100, (level+70)/70*100))))
-                self.window.voice_level_label.setText(f'音量 {level:.1f} dBFS · ' + ('偵測說話中' if self.segmenter.speaking else '等待說話'))
-                for segment in self.segmenter.feed(pcm):
+                segments = self.segmenter.feed(pcm)
+                state = '等待說話'
+                if self.segmenter.speaking:
+                    state = ('偵測到說話' if not self.segmenter.silence else
+                             f'等待停語 {self.segmenter.silence*.02:.1f}／{self.config.end_silence:.1f} 秒')
+                self.window.voice_level_label.setText(f'音量 {level:.1f} dBFS · {state}')
+                for segment in segments:
                     self.enqueue(segment)
         except Exception:
             self.stop()
@@ -212,8 +226,8 @@ class VoiceController(QObject):
 
     def enqueue(self, pcm):
         if len(self.queue) >= 3:
-            self.stop()
-            self.window.voice_note.setText('辨識跟不上收音，已停止麥克風；請用較短句或 tiny 模型。')
+            self.dropped_segments += 1
+            self.recognition_tick()
             return
         self.queue.append((pcm, self.window.worldline))
         self.next_segment()
@@ -226,13 +240,39 @@ class VoiceController(QObject):
         self.worker = RecognitionTask(self.recognizer, pcm, self.config, self.generation, self)
         self.worker.recognized.connect(self.recognized)
         self.worker.failed.connect(self.failed)
+        self.worker.progress.connect(self.recognition_progress)
         self.worker.finished.connect(self.finished)
-        self.window.voice_note.setText('本機離線辨識中 · 原始音訊不會上傳或寫入檔案')
+        self.recognition_started = time.monotonic()
+        self.recognition_seconds = len(pcm)/32000
+        self.recognition_phase = '準備本機離線辨識'
+        self.recognition_timer.start()
+        self.recognition_tick()
         self.worker.start()
+
+    def recognition_progress(self, stage, generation):
+        if self.closed or generation != self.generation or not self.source or not self.worker:
+            return
+        self.recognition_phase = stage
+        self.recognition_tick()
+
+    def recognition_tick(self):
+        if self.closed or not self.source or not self.worker:
+            self.recognition_timer.stop()
+            return
+        elapsed = int(time.monotonic()-self.recognition_started)
+        note = (f'{self.recognition_phase} · {self.worker.config.model}\n'
+                f'{self.recognition_seconds:.1f} 秒語音 · 已等待 {elapsed} 秒 · 待處理 {len(self.queue)} 段\n'
+                '原始音訊不保存／上傳')
+        if elapsed >= 20:
+            note += '\n可關閉麥克風取消；較慢時可改用 base／tiny。'
+        if self.dropped_segments:
+            note += f'\n辨識忙碌，已略過 {self.dropped_segments} 段；正在辨識的語音保留。'
+        self.window.voice_note.setText(note)
 
     def recognized(self, text, generation):
         if self.closed or generation != self.generation or not self.source or self.segment_worldline != self.window.worldline:
             return
+        self.recognition_timer.stop()
         if not text.strip():
             self.window.voice_note.setText('這段沒有可辨識文字；不呼叫 AI。')
             return
@@ -303,6 +343,7 @@ class VoiceController(QObject):
     def finished(self):
         if self.closed:
             return
+        self.recognition_timer.stop()
         task = self.worker
         self.worker = None
         if task:
@@ -340,7 +381,9 @@ class VoiceController(QObject):
     def stop(self):
         self.generation += 1
         self.send_timer.stop()
+        self.recognition_timer.stop()
         self.queue.clear()
+        self.dropped_segments = 0
         if self.source:
             self.source.blockSignals(True)
             if self.input:

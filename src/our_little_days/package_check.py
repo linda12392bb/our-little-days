@@ -25,7 +25,7 @@ def _transport_probe(connection, key, payload):
     connection.close()
 
 
-def check_package():
+def check_package(speech_test_dir=None):
     from PySide6.QtWidgets import QApplication
     from .capture import DemoBackend
     from .models import load_apartment_settings, load_characters
@@ -150,6 +150,19 @@ def check_package():
             process.close()
         receiver.close()
         sender.close()
+    if speech_test_dir:
+        import wave
+        from .speech import VoiceConfig, WhisperRecognizer
+        speech_test_dir = Path(speech_test_dir)
+        sample = speech_test_dir / 'public-jfk.wav'
+        assert hashlib.sha1(sample.read_bytes()).hexdigest() == 'c8c011f58c14f4d5a39beef7551280c846e3d047', 'Only the official public reference is accepted, never user recordings'
+        with wave.open(str(sample), 'rb') as wav:
+            assert (wav.getframerate(), wav.getnchannels(), wav.getsampwidth()) == (16000, 1, 2)
+            pcm = wav.readframes(wav.getnframes())
+        transcript = WhisperRecognizer(speech_test_dir).transcribe(pcm, VoiceConfig(model='tiny', language='auto'), lambda: False)
+        assert 'country' in transcript.lower(), 'Frozen ASR did not return reference text'
+        pcm = None
+        checks.append('frozen offline Whisper transcribed official public English reference with checksum-verified trained tiny weights; no microphone, API or audio files created')
     return {
         "status": "passed",
         "frozen": bool(getattr(sys, "frozen", False)),
@@ -162,12 +175,12 @@ def check_package():
     }
 
 
-def write_report(destination):
+def write_report(destination, speech_test_dir=None):
     import traceback
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
-        report = check_package()
+        report = check_package(speech_test_dir=speech_test_dir)
         code = 0
     except Exception:
         report = {"status": "failed", "traceback": traceback.format_exc(), "windows_manual_acceptance": "not_run"}

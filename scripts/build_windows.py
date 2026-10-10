@@ -26,6 +26,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-environment", choices=["native-windows", "linux-wine"], default="native-windows")
     parser.add_argument("--package-existing", action="store_true", help="Recheck and zip an already built folder")
+    parser.add_argument('--speech-test-dir', type=Path, help='Optional developer check: verified tiny model and official public-jfk.wav; never a microphone')
     args = parser.parse_args()
     if sys.platform != "win32" or sys.maxsize <= 2**32:
         raise SystemExit("Run with Windows x64 Python; Linux PyInstaller cannot build this exe.")
@@ -33,6 +34,7 @@ def main():
     source_hashes = {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                      for path in (root / 'src/our_little_days').rglob('*')
                      if path.is_file() and path.suffix in {'.py', '.json', '.txt'}}
+    source_hashes['scripts/windows_entry.py'] = hashlib.sha256((root/'scripts/windows_entry.py').read_bytes()).hexdigest()
     artifacts = root / "artifacts"
     artifacts.mkdir(exist_ok=True)
     if not args.package_existing:
@@ -78,7 +80,10 @@ def main():
             raise ValueError(f"Packaged profile differs: {source.name}")
     report_file = artifacts / "windows-package-check.json"
     report_file.unlink(missing_ok=True)
-    subprocess.run([str(executable), "--package-check", str(report_file)], cwd=folder, timeout=120, check=True)
+    check_command = [str(executable), "--package-check", str(report_file)]
+    if args.speech_test_dir:
+        check_command += ['--speech-test-dir', str(args.speech_test_dir)]
+    subprocess.run(check_command, cwd=folder, timeout=240 if args.speech_test_dir else 120, check=True)
     report = json.loads(report_file.read_text(encoding="utf-8"))
     if report["status"] != "passed" or report["frozen"] is not True:
         raise ValueError("Frozen package check failed")
@@ -102,7 +107,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.3.1",
+        "version": "0.3.2",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -120,7 +125,7 @@ def main():
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Voice-0.3.1-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Voice-0.3.2-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():

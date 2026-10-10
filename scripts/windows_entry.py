@@ -5,6 +5,9 @@ import sys
 
 def run():
     if sys.argv[1:2] == ["--package-check"]:
+        if len(sys.argv) == 5 and sys.argv[3] == '--speech-test-dir':
+            from our_little_days.package_check import write_report
+            return write_report(sys.argv[2], speech_test_dir=sys.argv[4])
         if len(sys.argv) != 3:
             return 2
         from our_little_days.package_check import write_report

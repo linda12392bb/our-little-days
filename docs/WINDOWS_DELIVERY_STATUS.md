@@ -1,5 +1,18 @@
 # Windows 試用包交付與驗證
 
+## 辨識文字空白修正 0.3.2
+
+- 下載：[Windows 語音 0.3.2](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Voice-0.3.2-preview.zip)，登入私人 GitHub，按 View raw。舊版 ZIP 全數保留。
+- 大小：58,824,154 bytes；SHA-256：`46c0891854aa16112d80ca3457db957a9288c12513aebf9f96dc0518feccebc2`。
+- EXE SHA-256：`914f561d82e5a70ed062de8ecfa9a0d93ebc9a34745f921262a157aa7944b5a8`。
+- 原因：whisper.cpp 1.8.2 的 stdin 輸入 `-f -` 會預設把輸出名稱設為 `-`，停用正常文字回呼。0.3.1 因此能正常結束但 stdout 沒有文字。修正設定非 `-` 的輸出名稱，保持不啟用任何輸出檔案格式，語音仍只在 RAM／stdin。
+- 新增驗證模型／辨識階段、等待秒數、語音長度、待處理段數；佇列滿時略過新段並明確提示，不取消正在辨識的段落。small 逾時上限 180 秒，其他模型 90 秒。
+- 116 項測試通過、2 項 Windows-only 跳過；完整十三角色與原始 source_text 稽核通過，設定檔未改。
+- 真實辨識驗證：官方公開 jfk.wav、與官方 SHA1 相符的已訓練 tiny 多語權重、官方 Windows Whisper CLI 1.8.2；相同公開語音在修正前為空白、修正後有文字。封裝後的 0.3.2 EXE 也經自動語言模式呼叫同一辨識路徑成功。無私人音訊、麥克風擷取或付費 API 請求。
+- 封裝後 SQLite 重開／備份、預設麥克風／AI 關閉、Qt／VAD／OpenCC、91 個官方二進位檔來源校驗均通過；建置與驗證環境為 Linux + Wine。**尚未完成新版在 Windows 實體 YETI X、小聲短句、中日混合及辨識速度驗收。** 使用者已回報 0.3.1 麥克風有音量且能進入辨識，預覽空白。
+- 在公寓下載成功的 small 已自動安裝，不用再匯入；只有瀏覽器另外下載的模型檔才需匯入。更新到新資料夾沿用 `%LOCALAPPDATA%\OurLittleDays`，不重下載模型或重置聊天／人格／關係／記憶／金鑰／預算。
+- 先保持 AI 關閉，選 YETI X 與已下載的 small，說一句話並停語超過 2.5 秒，觀察新辨識狀態與文字預覽。停語判定與模型運算是兩個等待階段，不能把 2.5 秒當作辨識完成保證。
+
 ## 麥克風啟動修正 0.3.1
 
 - 下載：[Windows 語音 0.3.1](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Voice-0.3.1-preview.zip)。原 0.3.0 ZIP 保留供查核，建議改用修正版。
