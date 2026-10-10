@@ -131,6 +131,19 @@ class AIController(QObject):
         w.ai_quiet_note.setText(f'{state}\n每 3 分鐘本機檢查 · 冷卻至少 {self.config.quiet_interval_minutes} 分鐘\n今日安靜聊天估算 NT${self.ledger.quiet_today():.4f}／NT${self.config.quiet_daily_budget_twd:.2f}\n同時計入月預算，不自動儲值；整批輸出上限 {self.config.max_output_tokens} tokens。')
         w.ai_screen_test.setEnabled(self.worker is None)
         w.ai_reply_test.setEnabled(self.worker is None)
+        w.ai_test_note.setText(self.last_note)
+
+    def test_failure(self, kind, reason, request_id=None):
+        if kind not in {'screen_test', 'reply_test', 'quiet_test'}:
+            return
+        row = self.ledger.db.execute('SELECT status,charged,input_tokens,output_tokens FROM requests WHERE id=?', (request_id,)).fetchone() if request_id else None
+        if row is None:
+            cost = '此次未送出 API 請求，不產生新費用。'
+        elif row['status'] == 'settled':
+            cost = f"API 已回報輸入 {row['input_tokens']} token／輸出 {row['output_tokens']} token\n本次估算 NT${row['charged']/1_000_000:.4f}；已列入月預算。"
+        else:
+            cost = f"本次待確認估算 NT${row['charged']/1_000_000:.4f}；可能已計費，保留在月預算內。"
+        QMessageBox.warning(self.window, '單次測試未完成', f'{reason}\n\n{cost}\n\n未標記測試通過，不會自動重試。既有聊天、人格與關係保留。')
 
     def settings(self):
         self.pause()
@@ -238,12 +251,14 @@ class AIController(QObject):
             self.last_note = str(exc)
             self.activity()
             self.refresh()
+            self.test_failure(kind, self.last_note)
             return False
         except Exception as exc:
             self.enabled = self.autonomous = self.quiet_enabled = False
             self.voice_inputs.clear()
             self.last_note = str(exc) if isinstance(exc, AIError) else '本機 AI 資料／預算無法讀取；已停止呼叫，請保留資料。'
             self.refresh()
+            self.test_failure(kind, self.last_note)
             return False
         self.user_message_id = user_message_id
         self.request_id = request_id
@@ -259,7 +274,8 @@ class AIController(QObject):
         self.worker.succeeded.connect(self.success)
         self.worker.failed.connect(self.failure)
         self.worker.finished.connect(self.finished)
-        self.last_note = f'{kind} 進行中 · 已預留 NT${reserve:.4f}'
+        task_label = {'screen_test':'單次畫面分析', 'reply_test':'單次角色回覆', 'quiet_test':'單次安靜群聊'}.get(kind, kind)
+        self.last_note = f'{task_label} 進行中 · 已預留 NT${reserve:.4f}'
         self.refresh()
         self.worker.start()
         return True
@@ -304,6 +320,7 @@ class AIController(QObject):
         self.voice_inputs.clear()
         self.last_note = error
         self.refresh()
+        self.test_failure(self.kind, error, self.request_id)
 
     def finished(self):
         if self.closed:

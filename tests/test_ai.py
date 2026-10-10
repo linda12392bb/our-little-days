@@ -211,6 +211,7 @@ def setup_fake(window, monkeypatch):
     monkeypatch.setattr(c.keys, 'read', lambda: 'mock-key-only')
     monkeypatch.setattr(c.keys, 'exists', lambda: True)
     monkeypatch.setattr(QMessageBox, 'information', lambda *args, **kwargs: None)
+    monkeypatch.setattr(QMessageBox, 'warning', lambda *args, **kwargs: None)
     calls = []
     def fake(key, payload, cancelled):
         calls.append(payload)
@@ -221,9 +222,113 @@ def setup_fake(window, monkeypatch):
         if context['task'] == 'reply_test':
             value['messages'] = [value['messages'][0]]
             value['messages'][0]['speaker_id'] = context['requested_character']
+            value['messages'][0]['recipient_ids'] = ['user']
+            value['messages'][0]['reply_to_index'] = None
+            value['messages'][0]['reply_to_message_id'] = None
         return response(value)
     monkeypatch.setattr(ai_ui, 'request_api', fake)
     return calls
+
+
+def test_request_schema_constrains_selected_character_and_real_reply_ids(store):
+    characters = store.load_characters()
+    before = [asdict(c) for c in characters]
+    for character in characters:
+        payload, _ = build_payload(AIConfig(), characters, store, 'main', 'reply_test', selected=character.id)
+        schema = payload['response_format']['json_schema']['schema']
+        messages = schema['properties']['messages']
+        fields = messages['items']['properties']
+        assert messages['minItems'] == messages['maxItems'] == 1
+        assert fields['speaker_id']['enum'] == [character.id]
+        assert fields['recipient_ids']['items']['enum'] == ['user']
+        assert fields['reply_to_index'] == fields['reply_to_message_id'] == {'type':'null'}
+        assert json.loads(payload['messages'][1]['content'][0]['text'])['characters'] == json.loads(json.dumps(before))
+    with pytest.raises(AIError, match='選擇一位住戶'):
+        build_payload(AIConfig(), characters, store, 'main', 'reply_test', selected='聖護')
+    main = store.append_message(speaker_id='user', speaker_name='月鹿', text='原始對話')
+    foreign = store.append_message(speaker_id='user', speaker_name='月鹿', text='其他世界線', worldline='glasshouse')
+    test = store.append_message(speaker_id='order', speaker_name='序', text='介面測試', source_kind='test')
+    payload, _ = build_payload(AIConfig(), characters, store, 'main', 'user_reply')
+    fields = payload['response_format']['json_schema']['schema']['properties']['messages']['items']['properties']
+    assert set(fields['speaker_id']['enum']) == {c.id for c in characters}
+    assert fields['reply_to_message_id']['enum'] == [None, main['id']]
+    assert foreign['id'] not in fields['reply_to_message_id']['enum'] and test['id'] not in fields['reply_to_message_id']['enum']
+    assert [asdict(c) for c in store.load_characters()] == before
+
+
+@pytest.mark.parametrize('change,reason', [
+    ('speaker', '無效角色 ID'), ('selected', '所選住戶不同'),
+    ('recipient', '無效對象 ID'), ('translation', '缺少繁體中文翻譯'),
+    ('language', '日文發言'), ('truncated', '輸出 token 上限'),
+    ('reference', '直接回覆使用者'), ('json', '無法解析'),
+])
+def test_failed_manual_button_shows_reason_and_paid_usage_without_retry(app, store, monkeypatch, change, reason):
+    import our_little_days.ai_ui as ai_ui
+    window = MainWindow(UnsupportedBackend(), store.load_characters(), store)
+    try:
+        calls = setup_fake(window, monkeypatch)
+        window.character_combo.setCurrentIndex(next(i for i, c in enumerate(window.characters) if c.id == 'order'))
+        warnings, successes = [], []
+        monkeypatch.setattr(QMessageBox, 'warning', lambda parent, title, text: warnings.append((title,text)))
+        monkeypatch.setattr(QMessageBox, 'information', lambda *args: successes.append(args))
+        before_profiles = store.load_characters()
+        store.add_memory('原始記憶保留')
+        original = store.append_message(speaker_id='user', speaker_name='月鹿', text='原始聊天保留')
+        before_messages = store.messages()
+        def bad(key, payload, cancelled):
+            calls.append(payload)
+            value = turn()
+            value['messages'] = value['messages'][:1]
+            m = value['messages'][0]
+            m['recipient_ids'] = ['user']
+            m['reply_to_message_id'] = None
+            if change == 'speaker': m['speaker_id'] = '序'
+            if change == 'selected': m['speaker_id'] = 'rixo'
+            if change == 'recipient': m['recipient_ids'] = ['月鹿']
+            if change == 'translation': m['segments'][0]['translation'] = ''
+            if change == 'language': m['segments'][0]['text'] = '中文替代日文'
+            if change == 'reference': m['reply_to_message_id'] = original['id']
+            result = response(value)
+            result['usage'] = {'prompt_tokens':15054, 'completion_tokens':161}
+            if change == 'truncated': result['choices'][0]['finish_reason'] = 'length'
+            if change == 'json': result['choices'][0]['message']['content'] = '{'
+            return result
+        monkeypatch.setattr(ai_ui, 'request_api', bad)
+        window.ai.pause()
+        QTest.mouseClick(window.ai_reply_test, Qt.MouseButton.LeftButton)
+        wait(lambda: window.ai.worker is None)
+        assert len(calls) == 1 and len(warnings) == 1 and not successes
+        assert reason in warnings[0][1]
+        assert '15054 token／輸出 161 token' in warnings[0][1]
+        assert 'NT$0.2072' in warnings[0][1]
+        assert '未標記測試通過' in warnings[0][1]
+        assert reason in window.ai_test_note.text()
+        totals = window.ai.ledger.totals()['month']
+        assert totals['requests'] == 1 and totals['input_tokens'] == 15054 and totals['uncertain_twd'] == 0
+        assert not window.ai.ledger.tests_passed(window.ai.config) and not window.ai.enabled
+        assert store.messages() == before_messages and store.memories()[0]['content'] == '原始記憶保留'
+        assert store.load_characters() == before_profiles
+        QTest.qWait(50)
+        assert len(calls) == 1
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_manual_preflight_failure_is_visible_and_never_paid(app, store, monkeypatch):
+    window = MainWindow(UnsupportedBackend(), store.load_characters(), store)
+    try:
+        calls = setup_fake(window, monkeypatch)
+        window.ai.config = replace(window.ai.config, transmission_approved=False)
+        warnings = []
+        monkeypatch.setattr(QMessageBox, 'warning', lambda parent,title,text: warnings.append(text))
+        QTest.mouseClick(window.ai_reply_test, Qt.MouseButton.LeftButton)
+        assert not calls and window.ai.ledger.totals()['month']['requests'] == 0
+        assert len(warnings) == 1 and '未送出 API 請求' in warnings[0]
+        assert '同意傳送' in window.ai_test_note.text()
+    finally:
+        window.close()
+        app.processEvents()
 
 
 def test_ui_offline_no_calls_then_two_tests_and_one_multispeaker_call(app, store, monkeypatch):

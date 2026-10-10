@@ -25,6 +25,58 @@ def _transport_probe(connection, key, payload):
     connection.close()
 
 
+def _check_manual_buttons(window):
+    """Exercise the shipped button, failure dialog and ledger with no network."""
+    from dataclasses import replace
+    import time
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QMessageBox
+    from . import ai_ui
+    c = window.ai
+    saved = (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
+             c.keys.read, c.keys.exists, c.config)
+    calls, warnings, successes = [], [], []
+    def fake(key, payload, cancelled):
+        calls.append(payload)
+        schema = payload['response_format']['json_schema']['schema']['properties']['messages']
+        assert schema['items']['properties']['speaker_id']['enum'] == ['order']
+        assert schema['minItems'] == schema['maxItems'] == 1
+        value = {'meaningful': True, 'event_key': '', 'summary': '', 'important': False,
+                 'messages':[{'speaker_id':'序' if len(calls) == 1 else 'order',
+                              'recipient_ids':['user'], 'reply_to_index':None, 'reply_to_message_id':None,
+                              'segments':[{'kind':'speech', 'text':'表示テストやで♡', 'translation':'這是顯示測試喔♡'}]}]}
+        return {'id':'offline-test-only', 'usage':{'prompt_tokens':15054, 'completion_tokens':161},
+                'choices':[{'finish_reason':'stop', 'message':{'content':json.dumps(value)}}]}
+    try:
+        ai_ui.request_api = fake
+        QMessageBox.warning = lambda parent,title,text: warnings.append(text)
+        QMessageBox.information = lambda parent,title,text: successes.append(text)
+        c.keys.read = lambda: 'package-test-not-an-api-key'
+        c.keys.exists = lambda: True
+        c.config = replace(c.config, transmission_approved=True)
+        window.character_combo.setCurrentIndex(1)
+        c.pause()
+        before = window.store.messages()
+        for number in (1, 2):
+            QTest.mouseClick(window.ai_reply_test, Qt.MouseButton.LeftButton)
+            deadline = time.monotonic()+10
+            while c.worker is not None and time.monotonic() < deadline:
+                QTest.qWait(10)
+            assert c.worker is None and len(calls) == number
+            if number == 1:
+                assert window.store.messages() == before and len(warnings) == 1 and not successes
+                assert '無效角色 ID' in warnings[0] and 'NT$0.2072' in warnings[0]
+                assert '無效角色 ID' in window.ai_test_note.text()
+        assert len(successes) == 1 and len(window.store.messages()) == len(before)+1
+        assert c.ledger.totals()['month']['requests'] == 2
+        assert c.ledger.totals()['month']['uncertain_twd'] == 0
+    finally:
+        (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
+         c.keys.read, c.keys.exists, c.config) = saved
+        c.pause()
+
+
 def check_package(speech_test_dir=None):
     from PySide6.QtWidgets import QApplication
     from .capture import DemoBackend
@@ -109,6 +161,8 @@ def check_package(speech_test_dir=None):
             assert reply['reply_to'] == original['id']
             assert store.conversation_context('main')['anchor_messages']
             assert not store.conversation_context('glasshouse')['anchor_messages']
+            _check_manual_buttons(window)
+            checks.append('frozen manual reply button works while AI paused; strict selected ID schema, safe failure dialog with settled usage and success dialog verified with mock provider, no network or retry')
             continuity = store.conversation_state('main')
             messages = store.messages()
             checks.append('quiet chat defaults OFF; 3-minute local check, 2000 shared output cap, NT$10 daily cap and persistent cross-batch peer replies verified with synthetic data, no API')

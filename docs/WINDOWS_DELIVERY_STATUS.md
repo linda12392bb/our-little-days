@@ -1,5 +1,18 @@
 # Windows 試用包交付與驗證
 
+## 單次 AI 角色測試格式與失敗提示 0.4.1
+
+- 下載：[Windows 自主陪伴 0.4.1](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.1-preview.zip)，登入私人 GitHub，按 View raw。原六個 ZIP 完整保留。
+- 大小：59,087,933 bytes；SHA-256：`f4f68173768db596c58c00af1f51a02ad486b6ded405cce9864d4cc58c94b29a`。
+- EXE SHA-256：`80c6d60e3dd8530164765921ca95b70a6d6cc83be5f89762a1b76ef8106def9a`。
+- 使用者 Windows 11 截圖確認 0.4.0 曾成功產生序的正式 API 回覆與用量視窗，之後顯示泛用「AI 回應結構、角色或翻譯不完整」，無失敗視窗。可確認請求有回應且未通過本機驗證；舊版未保存原始失敗回應，無法僅憑截圖確定具體欄位，不宣稱已重現該次正式模型回應。
+- 角色／對象 ID、單次測試的一則所選角色回覆、空接話參照、可引用真實同世界線對話 ID 直接約束於每次 strict JSON schema。所有十三份完整人格仍送出，不容忍錯誤世界線、缺翻譯或語言漂移。
+- 單次失敗也跳視窗，逐項區分角色／對象 ID、回覆者、翻譯、語言、參照、JSON 及輸出截斷；測試按鈕旁新增狀態。已回報 token 與估算費用仍保存並顯示；未送出明示無新費用，未知費用保留預留額。失敗不算測試通過、不自動重試。
+- SQLite、角色檔、世界線關係、接話錨點、原模型與 DPAPI 金鑰、所有既有用量／成本測試標記與自訂預算均沿用；本次未修改任何十三位角色資料或預算計算。所有請求仍共用月預算，沒有付款、儲值或付款設定操作。
+- 全套 **139 passed、2 Windows-only skipped**；十三人格稽核、Qt UI smoke 與依賴檢查通過。新增檢查真實按鈕點擊、所選十三人格式、跨 AU ID 隔離、八類失敗精確提示與 15054 輸入／161 輸出成本回報、無付費前置阻擋、無重試及原資料保留；API 全為模擬，未發送付費請求。
+- 重建 frozen Windows EXE，在 Linux + Wine 直接點擊打包後的角色測試按鈕：AI 暫停也能執行，失敗提示／已結算費用／成功訊息保存通過。DPAPI 測試金鑰、SQLite 重開／備份、跨批次接話、官方 Windows 二進位來源及公開已訓練 tiny 辨識範例亦通過。**0.4.1 Windows 實機與正式模型回應尚待使用者驗收**。
+- 更新方式：關閉舊程式，全部解壓到新資料夾，雙擊 EXE。已成功的目前設定畫面成本測試不需重做；只做一次角色測試。若再失敗，回報新視窗具體原因，不連續重試。
+
 ## 安靜自主聊天、跨批次接話 0.4.0
 
 - 下載：[Windows 自主陪伴 0.4.0](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.0-preview.zip)，登入私人 GitHub，按 View raw。五個原 ZIP 全數保留。

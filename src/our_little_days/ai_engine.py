@@ -1,6 +1,7 @@
 """Full persona context, image-change gate and validated multi-speaker turns."""
 import base64
 from dataclasses import asdict
+from copy import deepcopy
 import hashlib
 from importlib.resources import files
 import json
@@ -37,6 +38,36 @@ def _obj(properties):
 SEGMENT = _obj({'kind': {'type': 'string', 'enum': ['speech', 'narration']}, 'text': {'type': 'string'}, 'translation': {'type': 'string'}})
 MESSAGE = _obj({'speaker_id': {'type': 'string'}, 'recipient_ids': {'type': 'array', 'items': {'type': 'string'}}, 'reply_to_index': {'type': ['integer', 'null']}, 'reply_to_message_id': {'type': ['integer', 'null']}, 'segments': {'type': 'array', 'items': SEGMENT}})
 SCHEMA = _obj({'meaningful': {'type': 'boolean'}, 'event_key': {'type': 'string'}, 'summary': {'type': 'string'}, 'important': {'type': 'boolean'}, 'messages': {'type': 'array', 'items': MESSAGE}})
+
+
+def response_schema(characters, kind, selected, exposed_ids):
+    """Constrain identifiers before generation, rather than rejecting paid guesses."""
+    ids = [c.id for c in characters]
+    if kind == 'reply_test' and selected not in ids:
+        raise AIError('請先在「訊息氣泡測試」選擇一位住戶；尚未呼叫 API。')
+    schema = deepcopy(SCHEMA)
+    messages = schema['properties']['messages']
+    messages['maxItems'] = 4
+    fields = messages['items']['properties']
+    fields['speaker_id']['enum'] = [selected] if kind == 'reply_test' else ids
+    fields['recipient_ids']['items']['enum'] = ['user', *ids]
+    fields['segments'].update(minItems=1, maxItems=8)
+    fields['segments']['items']['properties']['text'].update(minLength=1, maxLength=2000)
+    fields['segments']['items']['properties']['translation']['maxLength'] = 3000
+    fields['reply_to_message_id'] = ({'type': ['integer', 'null'], 'enum': [None, *sorted(exposed_ids)]}
+                                     if exposed_ids else {'type': 'null'})
+    if kind == 'reply_test':
+        messages.update(minItems=1, maxItems=1)
+        fields['recipient_ids'].update(minItems=1, maxItems=1)
+        fields['recipient_ids']['items']['enum'] = ['user']
+        fields['reply_to_index'] = fields['reply_to_message_id'] = {'type': 'null'}
+    elif kind == 'screen_test':
+        messages['maxItems'] = 0
+    if kind in {'quiet_chat', 'quiet_test'}:
+        schema['properties']['event_key']['enum'] = ['']
+        schema['properties']['summary']['enum'] = ['']
+        schema['properties']['important']['enum'] = [False]
+    return schema
 
 
 def jpeg_url(image):
@@ -79,9 +110,14 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
     elif kind in {'screen_test', 'screen_event'}:
         raise AIError('請先開始擷取並取得指定視窗畫面。')
     instructions = INSTRUCTIONS + f'\n本次所有角色、敘事、翻譯與 JSON 合計最多 {config.max_output_tokens} 個輸出 token；簡短回應，務必完成結構與逐段翻譯。'
+    instructions += '\nspeaker_id 與 recipient_ids 只能填 characters 中的 id 原值；使用者 ID 固定 user，不填顯示名稱、圖示或月鹿。未接續某則訊息時兩個 reply_to 欄位都填 null，不猜測訊息 ID。日文角色的每一段發言與敘事均用自然日文（含假名）並提供繁體中文翻譯。'
+    if kind == 'reply_test':
+        instructions += f'\n本次只由 id={selected} 回覆測試問題，recipient_ids=["user"]，兩個 reply_to 欄位都為 null。只需一至兩句，不添加無關敘事。'
+    exposed_ids = {row['id'] for row in recent} | {row['id'] for row in ongoing['anchor_messages']}
+    schema = response_schema(characters, kind, selected, exposed_ids)
     payload = {'model': config.model, 'messages': [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': content}],
                'max_completion_tokens': config.max_output_tokens,
-               'response_format': {'type': 'json_schema', 'json_schema': {'name': 'apartment_turn', 'strict': True, 'schema': SCHEMA}}}
+               'response_format': {'type': 'json_schema', 'json_schema': {'name': 'apartment_turn', 'strict': True, 'schema': schema}}}
     # Conservative text cap: <= one token per UTF-8 byte + structural overhead.
     # Images <=960px; 32768 extra input tokens exceeds supported models' image accounting.
     text_bytes = len(json.dumps({**payload, 'messages': [payload['messages'][0], {'role': 'user', 'content': [content[0]]}]}, ensure_ascii=False).encode())
@@ -92,54 +128,65 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
 
 
 def validate_turn(response, characters, kind, selected=None, store=None, worldline='main'):
+    def invalid(reason):
+        raise AIError(f'AI 回應未通過檢查：{reason}。費用已記錄，不會自動重試或修改人格。')
+
     try:
         choice = response['choices'][0]
-        if choice.get('finish_reason') != 'stop' or choice['message'].get('refusal'):
-            raise ValueError()
+        if choice.get('finish_reason') == 'length':
+            invalid('回覆達到輸出 token 上限，內容被截斷')
+        if choice['message'].get('refusal'):
+            invalid('模型未提供可用回覆')
+        if choice.get('finish_reason') != 'stop':
+            invalid('模型未正常完成回覆')
         value = json.loads(choice['message']['content'])
         if set(value) != set(SCHEMA['properties']) or type(value['meaningful']) is not bool or type(value['important']) is not bool:
-            raise ValueError()
+            invalid('最外層欄位或資料型別不符合格式')
         if not isinstance(value['event_key'], str) or not isinstance(value['summary'], str) or len(value['event_key']) > 200 or len(value['summary']) > 3000:
-            raise ValueError()
+            invalid('事件識別或摘要欄位不符合格式')
         messages = value['messages']
         if kind in {'quiet_chat', 'quiet_test'} and (value['important'] or value['event_key'] or value['summary']):
-            raise ValueError()
+            invalid('安靜聊天不得新增事件或重要記憶')
         if not isinstance(messages, list) or len(messages) > 4 or (kind == 'screen_test' and messages) or (kind == 'reply_test' and len(messages) != 1):
-            raise ValueError()
+            invalid('角色訊息數量不符合此測試要求')
         ids = {c.id: c for c in characters}
         for index, m in enumerate(messages):
+            if not isinstance(m, dict) or m.get('speaker_id') not in ids:
+                invalid(f'第 {index+1} 則訊息使用無效角色 ID')
             c = ids[m['speaker_id']]
             if kind == 'reply_test' and c.id != selected:
-                raise ValueError()
+                invalid('回覆者與所選住戶不同')
             if not isinstance(m['recipient_ids'], list) or any(r not in {*ids, 'user'} for r in m['recipient_ids']):
-                raise ValueError()
+                invalid(f'第 {index+1} 則訊息使用無效對象 ID')
             reply = m['reply_to_index']
+            if kind == 'reply_test' and (m['recipient_ids'] != ['user'] or reply is not None or m.get('reply_to_message_id') is not None):
+                invalid('單次角色測試必須直接回覆使用者，不引用其他訊息')
             if reply is not None and (type(reply) is not int or not 0 <= reply < index or messages[reply]['speaker_id'] not in m['recipient_ids']):
-                raise ValueError()
+                invalid(f'第 {index+1} 則訊息的同批接話參照無效')
             previous = m.get('reply_to_message_id')
             if previous is not None:
                 if type(previous) is not int or reply is not None or store is None:
-                    raise ValueError()
+                    invalid(f'第 {index+1} 則訊息的跨批接話格式無效')
                 allowed = {row['id']: row for row in store.messages(worldline) if row['source_kind'] not in {'test', 'system'}}
                 exposed = set(list(allowed)[-60:]) | set(store.conversation_state(worldline).get('anchor_ids', []))
                 if previous not in exposed or previous not in allowed or allowed[previous]['speaker_id'] not in m['recipient_ids']:
-                    raise ValueError()
+                    invalid(f'第 {index+1} 則訊息引用未提供或不同世界線的對話')
             if not isinstance(m['segments'], list) or not 1 <= len(m['segments']) <= 8:
-                raise ValueError()
+                invalid(f'第 {index+1} 則訊息的發言或敘事段落數量無效')
             for seg in m['segments']:
                 if seg['kind'] not in {'speech', 'narration'} or not isinstance(seg['text'], str) or not seg['text'].strip() or len(seg['text']) > 2000 or not isinstance(seg['translation'], str) or len(seg['translation']) > 3000:
-                    raise ValueError()
+                    invalid(f'第 {index+1} 則訊息的段落欄位不完整或過長')
                 if c.translation_required and not seg['translation'].strip():
-                    raise ValueError()
+                    invalid(f'第 {index+1} 則訊息缺少繁體中文翻譯')
                 if c.language.startswith('ja') and not re.search('[ぁ-ゖァ-ヺ]', seg['text']):
-                    raise ValueError()
+                    invalid(f'第 {index+1} 則訊息未符合日文發言或敘事檢查')
                 if c.language == 'en' and not re.search('[a-zA-Z]', seg['text']):
-                    raise ValueError()
+                    invalid(f'第 {index+1} 則訊息未符合英文發言或敘事檢查')
         if kind == 'screen_event' and value['meaningful'] and (not value['event_key'].strip() or not value['summary'].strip()):
-            raise ValueError()
+            invalid('畫面新事件缺少事件識別或摘要')
         return value
     except (KeyError, TypeError, IndexError, ValueError):
-        raise AIError('AI 回應結構、角色或翻譯不完整；費用已記錄，不會自動重試或修改人格。') from None
+        invalid('JSON 或必要欄位不完整，無法解析')
 
 
 def event_seen(store, worldline, key):

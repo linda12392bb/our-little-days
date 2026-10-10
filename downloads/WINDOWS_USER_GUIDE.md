@@ -1,4 +1,4 @@
-# Windows 安裝與啟動：自主陪伴試用版 0.4.0
+# Windows 安裝與啟動：自主陪伴試用版 0.4.1
 
 這是 Windows 本機桌面程式。ZIP 已含 OurLittleDays.exe 與全部執行檔，**不用安裝 Python、不用下載原始碼、不用輸入指令、不用部署雲端網站**。支援 Windows 10/11 Intel / AMD 64 位元。
 
@@ -6,7 +6,7 @@
 
 1. 先在舊版按「記憶、事件與備份」→「備份整間公寓…」，將備份存到文件資料夾。關閉舊公寓視窗。
 2. 登入自己的 GitHub 帳號，開啟私人儲存庫的下載頁：
-   https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.0-preview.zip
+   https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.1-preview.zip
 3. 按檔案中間藍色 **View raw**，或右上方向下箭頭，下載 ZIP。這是下載，不需要預覽。不要按「Code → Download ZIP」，那是原始碼。
 4. 到電腦「下載」資料夾，對 ZIP 按右鍵 →「全部解壓縮」。選新資料夾，例如「文件\OurLittleDays-Voice」。等待完成。
 5. 打開解壓後的 OurLittleDays 資料夾，雙擊 OurLittleDays.exe。不要把 .exe 單獨搬出；同層的 _internal 與 speech-runtime 必須保留。
@@ -19,6 +19,17 @@
 ## 自動語音輸入
 
 右側往下捲，先下載一次免費 base 多語模型，再按「開啟麥克風 · 自動偵測」。不用每句按鍵。先在 AI 關閉時測音量與文字預覽，確認後才啟用原文字 AI；原始音訊不保存或上傳。詳細步驟與實測：[VOICE_INPUT.md](VOICE_INPUT.md)。
+
+## 0.4.1：單次角色測試沒有成功視窗的修正
+
+若 0.4.0 顯示「AI 回應結構、角色或翻譯不完整」，表示 API 已有回應但被驗證器拒絕，並非按鈕完全沒有執行。原版只顯示泛用狀態，不會跳出失敗視窗；截圖無法判定實際是哪個欄位不符。
+
+0.4.1 把所選角色 ID、使用者 ID、單次回覆數量及可引用的真實對話 ID 直接限制在 API 輸出格式中，減少付費後才發現名稱或參照不符。仍檢查母語及繁中翻譯，不降低人格／世界線保護，也不把失敗標記為測試通過。
+
+- 測試按鈕旁新增即時狀態；失敗會跳視窗，區分角色 ID、翻譯、語言、接話參照、JSON 及輸出截斷等原因。
+- 平台已回報用量時，失敗視窗仍顯示 token 與本機估算費用；未發送時明示沒有新費用。未知費用保留預留額，沒有自動重試。
+- 關閉舊版，解壓完整新版到新資料夾，雙擊 OurLittleDays.exe。原 SQLite、人格、關係、記憶、模型、金鑰與費用紀錄沿用；不要刪除本機資料資料夾。
+- 若畫面成本測試曾在目前設定下成功，只需做一次角色成本測試；成功後再勾文字 AI 及語音自動交給住戶。若仍失敗，把新視窗的具體原因提供給開發者，不要連續付費重試。
 
 ## 準備 API
 
