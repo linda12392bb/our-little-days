@@ -107,6 +107,8 @@ class MemoryDialog(QDialog):
             answer = QMessageBox.question(self, "確認還原整間公寓？", "這會以備份替換目前角色、關係、聊天、事件與記憶。\n程式會先備份目前資料到資料目錄的 backups 子資料夾。\n是否繼續？", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
             if answer != QMessageBox.StandardButton.Yes:
                 return
+            if self.parent().voice:
+                self.parent().voice.stop()
             self.parent().stop_monitoring()
             safety = self.store.restore(source, confirmed=True)
             self.restored = True

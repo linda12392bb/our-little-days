@@ -62,6 +62,22 @@ def check_package():
             profiles = store.load_characters()
             assert json.loads(json.dumps({c.id: asdict(c) for c in profiles}, ensure_ascii=False)) == original
             assert window.ai is not None
+            assert window.voice is not None and window.voice.source is None
+            assert not window.voice_save.isChecked() and window.voice_auto.isChecked()
+            from .speech import VoiceConfig, VoiceSegmenter, normalize_text, runtime_folder
+            assert not VoiceSegmenter(VoiceConfig()).feed(bytes(32000))
+            assert normalize_text('这个游戏。難しいね。') == '這個遊戲。難しいね。'
+            checks.append('microphone defaults OFF; local WebRTC VAD and packaged OpenCC dictionaries load; no audio capture')
+            if sys.platform == 'win32':
+                import subprocess
+                runtime = runtime_folder()
+                manifest = json.loads((runtime / 'SOURCE.json').read_text(encoding='utf-8'))
+                assert all(hashlib.sha256((runtime / name).read_bytes()).hexdigest() == digest for name, digest in manifest['files_sha256'].items())
+                env = os.environ.copy()
+                env['PATH'] = str(runtime)+os.pathsep+str(Path(sys.executable).parent/'_internal')+os.pathsep+env.get('PATH','')
+                probe = subprocess.run([str(runtime / 'whisper-cli.exe'), '--help'], env=env, cwd=runtime, capture_output=True, timeout=30)
+                assert probe.returncode == 0 and b'--language' in probe.stderr+probe.stdout
+                checks.append('official Windows Whisper CLI checksum and native help smoke check; model and microphone not opened')
             assert not window.ai.enabled and not window.ai.autonomous
             assert window.ai.ledger.totals()['month']['requests'] == 0
             assert '剩餘預算' in window.ai_usage.text()
@@ -137,7 +153,7 @@ def check_package():
         "checks": checks,
         "source_text_sha256": {c.id: hashlib.sha256(c.source_text.encode("utf-8")).hexdigest() for c in characters},
         "windows_manual_acceptance": "not_run",
-        "limitations": ["synthetic/offscreen UI only", "no real selected-window capture", "no live model API or actual billed cost test", "no native Windows Phase 2/3 acceptance"],
+        "limitations": ["synthetic/offscreen UI only", "no real selected-window capture", "no live model API or actual billed cost test", "no native Windows acceptance", "no real microphone or offline model accuracy acceptance"],
     }
 
 

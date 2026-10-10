@@ -1,1 +1,3 @@
 PySide6==6.10.2
+webrtcvad-wheels==2.0.14.post1
+opencc-python-reimplemented==0.1.7

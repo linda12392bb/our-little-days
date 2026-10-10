@@ -1,5 +1,6 @@
 """Local AI controls; all tasks pass one persistent budget reservation gate."""
 from dataclasses import replace
+from collections import deque
 import json
 import uuid
 
@@ -44,6 +45,7 @@ class AIController(QObject):
         self.request_id = None
         self.generation = 0
         self.pending_user = False
+        self.voice_inputs = deque()
         self.gate = ChangeGate()
         self.last_note = 'AI 關閉 · 不會呼叫 API'
         self.failed_request = False
@@ -83,6 +85,7 @@ class AIController(QObject):
     def pause(self):
         self.enabled = self.autonomous = False
         self.pending_user = False
+        self.voice_inputs.clear()
         self.generation += 1
         if self.worker:
             self.worker.requestInterruption()
@@ -115,13 +118,20 @@ class AIController(QObject):
         if self.gate.ready(image, self.config.minimum_interval_seconds):
             self.start('screen_event', image=image)
 
-    def user_sent(self):
+    def user_sent(self, transient_text=None, user_message_id="latest", include_image=False):
         if not self.enabled:
             return
+        if transient_text is not None:
+            if len(self.voice_inputs) >= 3:
+                self.last_note = '住戶忙碌，語音文字暫存已達上限；請先等候，不增加請求'
+                self.refresh()
+                return False
+            self.voice_inputs.append((transient_text, user_message_id, include_image, self.window.worldline))
         if self.worker:
             self.pending_user = True
         else:
-            self.start('user_reply')
+            return self.start('user_reply')
+        return True
 
     def start(self, kind, image=None):
         if self.worker:
@@ -136,6 +146,15 @@ class AIController(QObject):
             self.last_note = '合成展示畫面不會送至付費 API'
             self.refresh()
             return False
+        current_input = None
+        user_message_id = 'latest'
+        if kind == 'user_reply' and self.voice_inputs:
+            text, user_message_id, with_image, worldline = self.voice_inputs.popleft()
+            if worldline != self.window.worldline:
+                return False
+            current_input = {'kind':'voice_transcript', 'text':text, 'saved':user_message_id is not None}
+            if with_image and not self.window.backend.is_demo:
+                image = self.window.frame_image
         try:
             if not self.config.transmission_approved:
                 raise AIError('請先在本機 API 設定同意傳送所需資料並核對價格。')
@@ -145,13 +164,15 @@ class AIController(QObject):
             selected = self.window.character_combo.currentData().id if kind == 'reply_test' else None
             if image is None and kind == 'screen_test':
                 image = self.window.frame_image
-            payload, upper = build_payload(self.config, characters, self.window.store, worldline, kind, image, selected)
+            payload, upper = build_payload(self.config, characters, self.window.store, worldline, kind, image, selected, current_input)
             request_id, reserve = self.ledger.reserve(self.config, kind, upper)
         except Exception as exc:
             self.enabled = self.autonomous = False
+            self.voice_inputs.clear()
             self.last_note = str(exc) if isinstance(exc, AIError) else '本機 AI 資料／預算無法讀取；已停止呼叫，請保留資料。'
             self.refresh()
             return False
+        self.user_message_id = user_message_id
         self.request_id = request_id
         self.kind, self.selected = kind, selected
         self.request_characters, self.request_worldline = characters, worldline
@@ -180,7 +201,7 @@ class AIController(QObject):
             turn = validate_turn(response, self.request_characters, self.kind, self.selected)
             if self.window.worldline != self.request_worldline:
                 raise AIError('世界線已變更，忽略過時 AI 結果。')
-            records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind)
+            records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id)
             for record in records:
                 self.window.render_message(record)
             if self.kind in {'screen_test', 'reply_test'}:
@@ -200,6 +221,7 @@ class AIController(QObject):
         self.enabled = self.autonomous = False
         self.failed_request = True
         self.pending_user = False
+        self.voice_inputs.clear()
         self.last_note = error
         self.refresh()
 
@@ -211,7 +233,7 @@ class AIController(QObject):
         if task:
             task.deleteLater()
         self.refresh()
-        if self.pending_user and self.enabled and not self.failed_request:
+        if (self.pending_user or self.voice_inputs) and self.enabled and not self.failed_request:
             self.pending_user = False
             QTimer.singleShot(0, self.user_sent)
 

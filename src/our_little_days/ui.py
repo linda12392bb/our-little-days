@@ -4,7 +4,7 @@ from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
     QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QVBoxLayout,
-    QWidget, QPlainTextEdit, QTabWidget, QMessageBox,
+    QWidget, QPlainTextEdit, QTabWidget, QMessageBox, QDoubleSpinBox, QProgressBar,
 )
 
 from .models import MonitorState, is_night, taipei_now
@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
         self.setMinimumSize(920, 640)
         self.ai = None
+        self.voice = None
         self._build_ui()
         from .ai_ui import AIController
         try:
@@ -125,6 +126,11 @@ class MainWindow(QMainWindow):
             self.ai.refresh()
         except Exception:
             self.ai_note.setText("API 用量資料無法載入；AI 已停用，不會重置資料。")
+        from .speech_ui import VoiceController
+        try:
+            self.voice = VoiceController(self)
+        except Exception:
+            self.voice_note.setText("本機語音設定無法載入；麥克風保持關閉，不重置資料。")
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.request_capture)
         self.theme_timer = QTimer(self)
@@ -166,6 +172,8 @@ class MainWindow(QMainWindow):
         self.api_status = label("API 離線 · 尚未串接", "status")
         status.addWidget(self.capture_status)
         status.addWidget(self.api_status)
+        self.voice_status = label("○ 麥克風關閉", "status")
+        status.addWidget(self.voice_status)
         status.addStretch()
         self.clock = label("", "subtitle")
         status.addWidget(self.clock)
@@ -333,8 +341,80 @@ class MainWindow(QMainWindow):
         controls_layout.addWidget(ai_pause)
         self.ai_note = label("AI 關閉 · 不會呼叫 API", "hint", True)
         controls_layout.addWidget(self.ai_note)
+        controls_layout.addWidget(label("語音輸入 · 本機離線", "sectionTitle"))
+        from .speech_ui import load_voice_config
+        from .speech import MODELS, VoiceConfig
+        try:
+            voice_settings = load_voice_config(self.store)
+        except Exception:
+            voice_settings = VoiceConfig()
+        self.voice_device = QComboBox()
+        controls_layout.addWidget(self.voice_device)
+        refresh_mic = QPushButton("重新整理麥克風")
+        refresh_mic.clicked.connect(lambda: self.voice.refresh_devices() if self.voice else None)
+        controls_layout.addWidget(refresh_mic)
+        self.voice_model = QComboBox()
+        for name, value in MODELS.items():
+            self.voice_model.addItem(value['label'], name)
+        self.voice_model.setCurrentIndex(self.voice_model.findData(voice_settings.model))
+        controls_layout.addWidget(self.voice_model)
+        self.voice_model_note = label("首次下載模型後離線使用", "hint", True)
+        controls_layout.addWidget(self.voice_model_note)
+        self.voice_download = QPushButton("下載所選離線模型（一次）")
+        self.voice_download.clicked.connect(lambda: self.voice.prepare_model() if self.voice else None)
+        controls_layout.addWidget(self.voice_download)
+        self.voice_import = QPushButton("匯入已下載的官方模型…")
+        self.voice_import.clicked.connect(lambda: self.voice.prepare_model(True) if self.voice else None)
+        controls_layout.addWidget(self.voice_import)
+        self.voice_language = QComboBox()
+        for name, code in [("自動 · 繁中／日文／混合", "auto"), ("繁體中文優先", "zh"), ("日本語優先", "ja")]:
+            self.voice_language.addItem(name, code)
+        self.voice_language.setCurrentIndex(self.voice_language.findData(voice_settings.language))
+        controls_layout.addWidget(self.voice_language)
+        for attr, title, low, high, value, suffix in [
+            ('voice_threshold', '靈敏度門檻（越低越敏感）', -65, -25, voice_settings.threshold_db, ' dBFS'),
+            ('voice_gain', '輕聲增益', 0, 20, voice_settings.gain_db, ' dB'),
+            ('voice_silence', '說話結束等待', .5, 3, voice_settings.end_silence, ' 秒'),
+        ]:
+            controls_layout.addWidget(label(title, "hint", True))
+            spin = QDoubleSpinBox()
+            spin.setDecimals(1); spin.setRange(low, high); spin.setValue(value); spin.setSuffix(suffix)
+            setattr(self, attr, spin)
+            controls_layout.addWidget(spin)
+        self.voice_toggle = QPushButton("開啟麥克風 · 自動偵測")
+        self.voice_toggle.clicked.connect(lambda: self.voice.toggle() if self.voice else None)
+        controls_layout.addWidget(self.voice_toggle)
+        self.voice_level = QProgressBar()
+        self.voice_level.setRange(0, 100); self.voice_level.setValue(0); self.voice_level.setTextVisible(False)
+        controls_layout.addWidget(self.voice_level)
+        self.voice_level_label = label("沒有收音", "hint")
+        controls_layout.addWidget(self.voice_level_label)
+        self.voice_save = QCheckBox("永久保存辨識文字到聊天")
+        self.voice_save.setChecked(voice_settings.save_text)
+        controls_layout.addWidget(self.voice_save)
+        self.voice_auto = QCheckBox("預覽後自動交給住戶（需文字 AI）")
+        self.voice_auto.setChecked(voice_settings.auto_send)
+        controls_layout.addWidget(self.voice_auto)
+        self.voice_preview = QPlainTextEdit()
+        self.voice_preview.setPlaceholderText("辨識文字預覽 · 可修改或取消")
+        self.voice_preview.setMaximumHeight(90)
+        controls_layout.addWidget(self.voice_preview)
+        self.voice_submit = QPushButton("送出這段辨識文字")
+        self.voice_submit.clicked.connect(lambda: self.voice.deliver_preview() if self.voice else None)
+        controls_layout.addWidget(self.voice_submit)
+        self.voice_cancel = QPushButton("取消這段文字")
+        self.voice_cancel.clicked.connect(lambda: self.voice.cancel_preview() if self.voice else None)
+        controls_layout.addWidget(self.voice_cancel)
+        self.voice_note = label("麥克風預設關閉；不保存／上傳原始音訊。\n請戴耳機減少遊戲／動畫聲進入麥克風。", "hint", True)
+        controls_layout.addWidget(self.voice_note)
+        for widget in (self.voice_model, self.voice_language, self.voice_device):
+            widget.currentIndexChanged.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
+        for widget in (self.voice_threshold, self.voice_gain, self.voice_silence):
+            widget.valueChanged.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
+        for widget in (self.voice_save, self.voice_auto):
+            widget.toggled.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
         controls_layout.addStretch()
-        controls_layout.addWidget(label("Windows 本機 · Phase 2/3", "sectionTitle"))
+        controls_layout.addWidget(label("Windows 本機 · 語音試用 0.3", "sectionTitle"))
         controls_layout.addWidget(label("聊天與角色資料永久保存在本機。\n不錄影、不存截圖。只有手動啟用 AI 後，\n選定視窗圖片與所需文字才會傳送 API。\n暫停觀察不會刪除記憶。", "hint", True))
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -345,7 +425,7 @@ class MainWindow(QMainWindow):
         controls_scroll.setWidget(controls)
         columns.addWidget(controls_scroll)
         columns.setSizes([170, 620, 285])
-        outer.addWidget(label("PHASE 02/03  /  費用控制與多人陪伴試用版                         ☾ 給日常留一盞燈", "footer"))
+        outer.addWidget(label("語音試用 0.3  /  自動收音 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
         self.update_controls()
 
     def apply_theme(self, *_):
@@ -376,7 +456,9 @@ class MainWindow(QMainWindow):
             QPushButton:disabled {{ color: {muted}; background: {bg}; }}
             QPushButton#primary {{ background: #79546D; color: #FFFFFF; border: none; font-weight: 600; }}
             QPushButton#primary:disabled {{ background: {button}; color: {muted}; }}
-            QComboBox, QSpinBox, QPlainTextEdit {{ background: {panel}; border: 1px solid {border}; border-radius: 8px; padding: 7px; }}
+            QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit {{ background: {panel}; border: 1px solid {border}; border-radius: 8px; padding: 7px; }}
+            QProgressBar {{ background: {panel}; border: 1px solid {border}; border-radius: 5px; min-height: 10px; }}
+            QProgressBar::chunk {{ background: {border}; border-radius: 4px; }}
             QComboBox QAbstractItemView {{ background: {panel}; color: {text}; selection-background-color: {button}; }}
             QTabWidget::pane {{ background: {panel}; border: 1px solid {border}; }}
             QTabBar::tab {{ background: {panel}; color: {text}; padding: 8px 12px; }}
@@ -690,8 +772,15 @@ class MainWindow(QMainWindow):
             self.apply_theme()
             if self.ai:
                 self.ai.refresh()
+            if self.voice:
+                from .speech_ui import load_voice_config
+                self.voice.config = load_voice_config(self.store)
+                self.voice.refresh_devices()
+                self.voice.refresh()
 
     def closeEvent(self, event):
+        if self.voice:
+            self.voice.close()
         self.stop_monitoring()
         self.theme_timer.stop()
         if self.ai:

@@ -1,4 +1,4 @@
-# Windows 安裝與啟動：Phase 2/3 最小試用版
+# Windows 安裝與啟動：自動語音輸入試用版 0.3.0
 
 這是 Windows 本機桌面程式。ZIP 已含 OurLittleDays.exe 與全部執行檔，**不用安裝 Python、不用下載原始碼、不用輸入指令、不用部署雲端網站**。支援 Windows 10/11 Intel / AMD 64 位元。
 
@@ -6,15 +6,19 @@
 
 1. 先在舊版按「記憶、事件與備份」→「備份整間公寓…」，將備份存到文件資料夾。關閉舊公寓視窗。
 2. 登入自己的 GitHub 帳號，開啟私人儲存庫的下載頁：
-   https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Phase2-3-preview.zip
+   https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Voice-preview.zip
 3. 按檔案中間藍色 **View raw**，或右上方向下箭頭，下載 ZIP。這是下載，不需要預覽。不要按「Code → Download ZIP」，那是原始碼。
-4. 到電腦「下載」資料夾，對 ZIP 按右鍵 →「全部解壓縮」。選新資料夾，例如「文件\OurLittleDays-Phase2-3」。等待完成。
-5. 打開解壓後的 OurLittleDays 資料夾，雙擊 OurLittleDays.exe。不要把 .exe 單獨搬出；同層的 _internal 必須保留。
-6. 原有聊天與記憶應自動出現。新版讀取同一個 Windows 帳號的本機永久資料。AI 與擷取均先關閉，不會開機就付費。
+4. 到電腦「下載」資料夾，對 ZIP 按右鍵 →「全部解壓縮」。選新資料夾，例如「文件\OurLittleDays-Voice」。等待完成。
+5. 打開解壓後的 OurLittleDays 資料夾，雙擊 OurLittleDays.exe。不要把 .exe 單獨搬出；同層的 _internal 與 speech-runtime 必須保留。
+6. 原有聊天與記憶應自動出現。新版讀取同一個 Windows 帳號的本機永久資料。麥克風、AI 與擷取均先關閉，不會開機就付費。
 
 目前沒有安裝精靈或數位簽章；若 Windows 顯示信任提示，請先核對檔案確實來自你自己的私人儲存庫。不要關閉防毒。如果程式被封鎖，保留提示內容供診斷。
 
 使用者已確認 Phase 1 能在 Windows 11 擷取 Chrome。這次 Phase 2/3 尚待真正 Windows 測試，開發端封裝檢查不等於 Windows 實機或 AI 成本測試通過。
+
+## 自動語音輸入
+
+右側往下捲，先下載一次免費 base 多語模型，再按「開啟麥克風 · 自動偵測」。不用每句按鍵。先在 AI 關閉時測音量與文字預覽，確認後才啟用原文字 AI；原始音訊不保存或上傳。詳細步驟與實測：[VOICE_INPUT.md](VOICE_INPUT.md)。
 
 ## 準備 API
 
@@ -38,7 +42,7 @@ ChatGPT 訂閱與 API 計費分開。**請不要把 Key 貼到聊天室、GitHub
 1. 開啟一個內容適合分析的 Chrome 視窗，避開金鑰與付款資料頁。
 2. 公寓按「重新整理視窗」，選 Chrome，按「開始陪伴」。預覽正確即可；每 6 秒只是本機擷取。
 3. 往下捲，按 **「單次畫面分析 · 測量費用」**。只送一次請求，成功後會顯示分析摘要、實際回報的輸入／輸出 token 及換算 NT$。
-4. 在「訊息氣泡測試」的角色選单先選 **序**（也可選其他住戶）。按 **「單次所選角色回覆 · 測量費用」**。只送一次請求，角色回覆會保存到聊天室。
+4. 在「訊息氣泡測試」的角色選單先選 **序**（也可選其他住戶）。按 **「單次所選角色回覆 · 測量費用」**。只送一次請求，角色回覆會保存到聊天室。
 5. 記下兩次結果，核對模型、用量與「本月剩餘預算」。價格是本機估算；OpenAI 平台帳單可能稍晚更新。
 6. 如果出現連線、金鑰、額度或格式錯誤，AI 會停止，不自動重試。可能已付費的請求會列為待確認預留額，避免低估。先處理錯誤再按單次測試。
 

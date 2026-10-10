@@ -1,0 +1,13 @@
+{
+  "project": "ggml-org/whisper.cpp",
+  "version": "1.8.2",
+  "source": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.8.2/whisper-bin-x64.zip",
+  "archive_sha256": "b1514ebc099765e39fa37eb780b92a140a94c86bb0b3b3d98226b38825979732",
+  "files_sha256": {
+    "whisper-cli.exe": "dc1648751878e91acb5cfaa69bd85cff64ede44497a108844ad9d4f106cb14e8",
+    "whisper.dll": "4155edb6868810b56423cb0089fee85f4e8739fb86053b269f4e7c6350ec61ff",
+    "ggml.dll": "4f681cca3014879e623b9b44f69b0864a9ddd530c32ce05c106105f4eec0897a",
+    "ggml-base.dll": "3eefa9a256a7ef4774ec07d553ccecb771498a92000d0db7ab3443d79b795e86",
+    "ggml-cpu.dll": "91240f9a352783312430e3b5d816621675afd2dfb9df28161bea235c4b7f1ce3"
+  }
+}

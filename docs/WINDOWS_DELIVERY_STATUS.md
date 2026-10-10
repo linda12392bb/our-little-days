@@ -1,5 +1,20 @@
 # Windows 試用包交付與驗證
 
+## 自動語音輸入 0.3.0
+
+- 檔名：`OurLittleDays-Windows-x64-Voice-preview.zip`
+- 大小：58,820,442 bytes
+- SHA-256：`43a05da792c0a2fb6c73be9559bc3ceaacddb1acb10d769ffe51713b157142e8`
+- EXE SHA-256：`1d6e1f3f4ac59e65124adf9bf7fed3975d79d709959422d986478a198d785130`
+- 109 項自動化測試通過、2 項 Windows-only 跳過；十三個角色檔及原始設定完全未改。
+- 新增手動開啟後自動偵測麥克風、WebRTC VAD、音量、門檻／增益與 1.5 秒分句、文字預覽與自動送出。Whisper 本機多語 CPU 執行檔含於 ZIP，首次需明確下載免費模型。
+- 不產生原始音訊檔、不上傳音訊；辨識文字預設不存聊天，住戶回覆沿用 SQLite，語音回覆與指定畫面共用原預算。
+- 已驗證封裝內 VAD／OpenCC、Whisper CLI 啟動與校驗、SQLite 重開／備份、預設麥克風關閉；91 個 Windows wheel／官方 Whisper DLL/PYD 來源校驗，沒有 Wine 系統檔。
+- 建置環境 Linux + Wine，**沒有 Windows 實體麥克風驗收，沒有真實模型權重辨識、小聲短句或中日混合準確度測試，也沒有真實 API 成本測試**。雲端下載 Hugging Face 模型受到網路政策限制。
+- 詳細操作／後續驗收與改善順序：[VOICE_INPUT.md](VOICE_INPUT.md)。
+
+下載：[私人 GitHub 語音試用包](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Voice-preview.zip)，按 View raw。Phase 1／Phase 2/3 原 ZIP 均保留，更新讀原本機 SQLite。
+
 ## Phase 2/3 0.2.0
 
 - 檔名：`OurLittleDays-Windows-x64-Phase2-3-preview.zip`

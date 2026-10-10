@@ -38,18 +38,29 @@ def main():
     if not args.package_existing:
         subprocess.run([
             sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--onedir",
-            "--name", "OurLittleDays", "--paths", str(root / "src"), "--collect-data", "our_little_days",
+            "--name", "OurLittleDays", "--paths", str(root / "src"), "--collect-data", "our_little_days", "--collect-data", "opencc",
+            "--additional-hooks-dir", str(root / 'packaging/hooks'),
             "--workpath", str(root / "build/windows"), "--specpath", str(root / "build/windows"),
             "--distpath", str(root / "dist"), str(root / "scripts/windows_entry.py"),
         ], cwd=root, check=True)
     if any(hashlib.sha256((root / name).read_bytes()).hexdigest() != digest for name, digest in source_hashes.items()):
         raise ValueError('Runtime source changed during build; rebuild before delivery')
     folder = root / "dist/OurLittleDays"
+    speech_source = root / 'packaging/speech-runtime'
+    speech_manifest = json.loads((speech_source / 'SOURCE.json').read_text(encoding='utf-8'))
+    if speech_manifest['version'] != '1.8.2' or speech_manifest['archive_sha256'] != 'b1514ebc099765e39fa37eb780b92a140a94c86bb0b3b3d98226b38825979732':
+        raise ValueError('Unexpected official Whisper runtime release')
+    for name, digest in speech_manifest['files_sha256'].items():
+        path = speech_source / name
+        validate_windows_executable(path)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise ValueError(f'Whisper runtime checksum mismatch: {name}')
+    shutil.copytree(speech_source, folder / 'speech-runtime', dirs_exist_ok=True)
     executable = folder / "OurLittleDays.exe"
     validate_windows_executable(executable)
     # Only redistribute actual Python/wheel binaries. In particular, never bundle
     # Wine system DLLs or compatibility forwarders used by the build environment.
-    official_hashes = set()
+    official_hashes = set(speech_manifest['files_sha256'].values())
     for prefix in {Path(sys.prefix), Path(sys.base_prefix)}:
         for path in prefix.rglob("*"):
             if path.is_file() and path.suffix.lower() in {".dll", ".pyd"}:
@@ -73,16 +84,17 @@ def main():
         raise ValueError("Frozen package check failed")
     report["build_environment"] = args.build_environment
     report_file.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    for name in ["WINDOWS_USER_GUIDE.md", "WINDOWS_TEST_CHECKLIST.md"]:
+    for name in ["WINDOWS_USER_GUIDE.md", "WINDOWS_TEST_CHECKLIST.md", "VOICE_INPUT.md"]:
         shutil.copyfile(root / "docs" / name, folder / name)
     (folder / "START_HERE.txt").write_text((root / "docs/WINDOWS_USER_GUIDE.md").read_text(encoding="utf-8"), encoding="utf-8-sig")
     shutil.copytree(root / "packaging/licenses", folder / "LICENSES", dirs_exist_ok=True)
+    shutil.copyfile(speech_source / 'LICENSE', folder / 'LICENSES/whisper.cpp-MIT.txt')
     # Retain license files shipped by dependencies as well as the LGPL text.
     from importlib.metadata import distribution
-    for name in ["PySide6", "PySide6_Essentials", "shiboken6", "pyinstaller"]:
+    for name in ["PySide6", "PySide6_Essentials", "PySide6_Addons", "shiboken6", "pyinstaller", "webrtcvad-wheels", "opencc-python-reimplemented"]:
         package = distribution(name)
         for entry in package.files or []:
-            if "/licenses/" in entry.as_posix():
+            if "/licenses/" in entry.as_posix() or entry.name.upper().startswith(('LICENSE', 'COPYING', 'NOTICE')):
                 destination = folder / "LICENSES" / name / entry.name
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(package.locate_file(entry), destination)
@@ -90,7 +102,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.2.0",
+        "version": "0.3.0",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -99,15 +111,16 @@ def main():
         "executable_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
         "package_check": "passed (offscreen and temporary data only)",
         "official_python_wheel_binaries_verified": checked_binaries,
+        "whisper_runtime": speech_manifest,
         "windows_manual_acceptance": "not_run",
         "signing": "unsigned",
-        "scope": "Phase 2/3 minimum: OpenAI, budget, selected-window events, multi-speaker dialogue; live API and native Windows tests pending",
+        "scope": "Automatic microphone input, local VAD and offline multilingual Whisper; existing Phase 2/3 AI and budget. Native microphone, ASR accuracy and live API acceptance pending.",
     }
     (folder / "BUILD_INFO.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Phase2-3-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Voice-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():

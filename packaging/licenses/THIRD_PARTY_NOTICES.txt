@@ -1,4 +1,4 @@
-OUR LITTLE DAYS Phase 1 Windows preview
+OUR LITTLE DAYS Automatic voice input Windows preview
 
 This portable folder includes unmodified third-party components:
 
@@ -23,4 +23,14 @@ restriction on those rights.
 
 Build-time Wine and its temporary compatibility components are not included
 in this folder. All redistributed DLL/PYD files are checked against the
-Windows Python distribution or the installed pinned Windows wheels.
+Windows Python distribution, installed pinned Windows wheels, or the official
+whisper.cpp v1.8.2 archive and its pinned SHA-256 manifest.
+
+* whisper.cpp 1.8.2: MIT license, official Windows x64 CPU binaries.
+  See whisper.cpp-MIT.txt and speech-runtime/SOURCE.json.
+  https://github.com/ggml-org/whisper.cpp/releases/tag/v1.8.2
+* webrtcvad-wheels 2.0.14.post1: MIT wrapper and BSD-style WebRTC notices.
+  See webrtcvad-wheels license files. https://github.com/daanzu/py-webrtcvad-wheels
+* opencc-python-reimplemented 0.1.7: Apache 2.0 license.
+  See opencc-python-reimplemented license files.
+  https://github.com/yichen0831/opencc-python
