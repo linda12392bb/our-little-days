@@ -41,6 +41,10 @@ def _check_manual_buttons(window):
         calls.append(payload)
         context = json.loads(payload['messages'][1]['content'][0]['text'])
         kind = context['task']
+        assert [m['role'] for m in payload['messages']] == ['system','user','system','user']
+        focus = json.loads(payload['messages'][-1]['content'])
+        assert focus['task']==kind and focus['visual_evidence']==context['visual_evidence']
+        assert '常体を使い、丁寧語・敬語で話さない' in payload['messages'][2]['content']
         schema = payload['response_format']['json_schema']['schema']['properties']['messages']
         item = schema['items']
         variants = item.get('anyOf', [item])
@@ -51,6 +55,7 @@ def _check_manual_buttons(window):
         if kind == 'user_reply':
             assert schema['minItems'] == 1 and item['properties']['reply_to_message_id'] == {'type':'null'}
             assert context['current_user_input'] == {'kind':'typed_text','text':'晚安','saved':True}
+            assert focus['current_user_input']==context['current_user_input']
             assert context['character_address_rules']['shogo'] == '月'
             assert context['character_address_rules']['reo'] == '小鳥ちゃん'
             assert context['visual_evidence']['image_attached'] is False
@@ -76,7 +81,10 @@ def _check_manual_buttons(window):
                  'segments':[{'kind':'speech','text':'僕も参加いたします。','translation':'我也來參與。'}]},
             ]
         usage = {'prompt_tokens':15759, 'completion_tokens':346} if kind == 'quiet_test' else {'prompt_tokens':15054, 'completion_tokens':161}
-        return {'id':'offline-test-only', 'usage':usage,
+        if kind=='user_reply' and len(calls)==5:
+            value['read_character_ids']=[]
+            value['messages'][0].update(speaker_id='shogo', segments=[{'kind':'speech','text':'はい、小鳥ちゃん、こちらの画面は確かに見えております。','translation':'是的，小鳥ちゃん，我確實看見畫面。'}])
+        return {'id':'offline-test-only', 'model':'gpt-4.1-mini-offline-test', 'usage':usage,
                 'choices':[{'finish_reason':'stop', 'message':{'content':json.dumps(value)}}]}
     try:
         ai_ui.request_api = fake
@@ -133,6 +141,18 @@ def _check_manual_buttons(window):
         assert display_message_text('うん。\n（嗯。）\n（嗯。）')[0]=='うん。\n（嗯。）'
         assert display_message_text('うん。\n（嗯。）\nうん。\n（嗯。）')[0].count('（嗯。）')==2
         assert c.enabled and c.quiet_enabled and len(warnings) == 1
+        window.chat_input.setPlainText('晚安')
+        QTest.mouseClick(window.send_button, Qt.MouseButton.LeftButton)
+        deadline = time.monotonic()+10
+        while c.worker is not None and time.monotonic()<deadline:
+            QTest.qWait(10)
+        assert c.worker is None and len(calls)==5 and c.enabled and c.quiet_enabled
+        assert '回覆檢查提示' in c.last_note and '沒有自動重試' in c.last_note
+        diagnostic=window.store.reply_diagnostic(window.worldline)
+        assert diagnostic['image_attached'] is False and diagnostic['provider_model']=='gpt-4.1-mini-offline-test'
+        assert len(diagnostic['warnings'][0]['notes'])==3
+        assert window.store.messages()[-1]['text'].startswith('はい、小鳥ちゃん')
+        assert c.ledger.totals()['month']['uncertain_twd']==0
         from PySide6.QtWidgets import QDialog, QTabWidget
         window.character_combo.setCurrentIndex(11)
         original_exec = QDialog.exec
@@ -144,12 +164,14 @@ def _check_manual_buttons(window):
             assert '不使用敬語' in tabs.widget(0).toPlainText() and '自稱：僕' in tabs.widget(0).toPlainText()
             assert '準備使用的稱呼：月' in tabs.widget(1).toPlainText()
             assert 'かみそりちゃん' in tabs.widget(2).toPlainText()
+            assert tabs.tabText(6)=='最近回覆檢查' and '本次實際附圖：否' in tabs.widget(6).toPlainText()
+            assert '直接使用其他角色的稱呼' in tabs.widget(6).toPlainText()
             viewed.append(True)
             return QDialog.DialogCode.Accepted
         try:
             QDialog.exec = inspect
             window.inspect_character()
-            assert viewed and len(calls) == 4
+            assert viewed and len(calls) == 5
         finally:
             QDialog.exec = original_exec
     finally:
@@ -278,6 +300,7 @@ def check_package(speech_test_dir=None):
             checks.append('frozen send button replies immediately to pinned typed input while quiet mode remains ON; history-ID schema couples each ID with its true speaker, no network')
             checks.append('frozen persona viewer shows actual SQLite 月 address, soft plain Japanese/no keigo/僕 and prepared request diagnostic separately from retained original source; inspection makes no API call')
             checks.append('frozen roster uses latest user round: actual responder only, explicit Shogo read decision, others absent; exact adjacent translation repeats hidden without extra requests')
+            checks.append('frozen reply advisory detects Shogo mixed nickname/keigo and unattached-image claims; actual provider model/image status persisted and viewer free; reply retained, modes stay ON, one mock request without retry; latest input after full persona context')
             continuity = store.conversation_state('main')
             messages = store.messages()
             checks.append('quiet chat defaults OFF; 3-minute local check, 2000 shared output cap, NT$10 daily cap and persistent cross-batch peer replies verified with synthetic data, no API')

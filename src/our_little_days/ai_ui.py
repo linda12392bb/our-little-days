@@ -274,6 +274,7 @@ class AIController(QObject):
         self.kind, self.selected = kind, selected
         self.request_characters, self.request_worldline = characters, worldline
         self.request_config = self.config
+        self.request_image_attached = any(part.get('type') == 'image_url' for message in payload['messages'] if isinstance(message['content'], list) for part in message['content'])
         self.request_generation = self.generation
         self.failed_request = False
         self.activity()
@@ -300,7 +301,7 @@ class AIController(QObject):
             turn = validate_turn(response, self.request_characters, self.kind, self.selected, self.window.store, self.request_worldline)
             if self.window.worldline != self.request_worldline:
                 raise AIError('世界線已變更，忽略過時 AI 結果。')
-            records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id, quiet_cooldown=self.request_config.quiet_interval_minutes)
+            records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id, quiet_cooldown=self.request_config.quiet_interval_minutes, image_attached=self.request_image_attached, response_model=response.get('model'))
             for record in records:
                 self.window.render_message(record)
             if self.request_roster is not None and self.window.transient_roster is self.request_roster:
@@ -312,6 +313,10 @@ class AIController(QObject):
                 detail = turn['summary'] if self.kind == 'screen_test' else '角色回覆已保存到聊天'
                 QMessageBox.information(self.window, '單次實際用量測試', f"模型：{self.request_config.model}\nAPI 回報輸入 {response['usage']['prompt_tokens']} token／輸出 {response['usage']['completion_tokens']} token\n本機估算 NT${actual:.4f}\n{detail}\n\n這是實際請求的用量換算，平台實際帳單以 OpenAI 為準。")
             self.last_note = f'本次估算 NT${actual:.4f} · ' + ('未發言；本次分析仍計費' if not records and self.kind in {'screen_event', 'quiet_chat', 'quiet_test'} else '已完成')
+            diagnostic = self.window.store.reply_diagnostic(self.request_worldline)
+            if records and diagnostic.get('message_ids') == [r['id'] for r in records] and diagnostic.get('warnings'):
+                notes = list(dict.fromkeys(note for warning in diagnostic['warnings'] for note in warning['notes']))
+                self.last_note += ' · 回覆檢查提示：' + '；'.join(notes) + '。原回覆保留、費用已計入；沒有自動重試。'
         except Exception as exc:
             self.failure(str(exc) if isinstance(exc, AIError) else 'AI 結果儲存失敗，已停止 AI；保留用量與既有資料。')
         finally:

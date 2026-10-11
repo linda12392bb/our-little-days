@@ -454,7 +454,7 @@ class MainWindow(QMainWindow):
         for widget in (self.voice_save, self.voice_auto):
             widget.toggled.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
         controls_layout.addStretch()
-        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.6", "sectionTitle"))
+        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.7", "sectionTitle"))
         controls_layout.addWidget(label("聊天與角色資料永久保存在本機。\n不錄影、不存截圖。只有手動啟用 AI 後，\n選定視窗圖片與所需文字才會傳送 API。\n暫停觀察不會刪除記憶。", "hint", True))
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -465,7 +465,7 @@ class MainWindow(QMainWindow):
         controls_scroll.setWidget(controls)
         columns.addWidget(controls_scroll)
         columns.setSizes([170, 620, 285])
-        outer.addWidget(label("自主陪伴試用 0.4.6  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
+        outer.addWidget(label("自主陪伴試用 0.4.7  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
         self.update_controls()
 
     def apply_theme(self, *_):
@@ -763,6 +763,13 @@ class MainWindow(QMainWindow):
         if preparation:
             used = preparation['characters'].get(ident, {})
             diagnostic = f'本機準備時間：{preparation["prepared_at"]}\n世界線：{preparation["worldline"]}\n模型：{preparation["model"]}\n準備使用的稱呼：{used.get("user_address") or "尚未指定"}\n準備使用的自稱：{used.get("self_reference") or "尚未指定"}\n準備使用的語氣：{used.get("tone") or "尚未提供"}\n準備使用的語體：{(used.get("language_rules") or {}).get("register", "尚未指定")}\n\n準備使用的行為：\n' + '\n'.join('• '+b for b in used.get('behavior', [])) + '\n\n這是本機準備紀錄，不代表 API 已收到、已付費或模型已遵守；實際執行結果請看 AI 狀態與用量。'
+        result = self.store.reply_diagnostic(self.worldline)
+        reply_check = '這條世界線尚無新版回覆檢查紀錄；舊版結果不倒推為已檢查。查看不呼叫 API。'
+        if result:
+            participated = ident in result.get('replied_character_ids', [])
+            notes = [note for warning in result['warnings'] if warning['character_id']==ident for note in warning['notes']]
+            image_status = {True:'是；僅一張指定視窗圖片', False:'否；不能聲稱看見當前畫面', None:'未記錄，無法判定'}[result.get('image_attached')]
+            reply_check = f'完成時間：{result["completed_at"]}\n世界線：{result["worldline"]}\nAPI 回報模型：{result.get("provider_model") or "API 未提供"}\n本次實際附圖：{image_status}\n這位住戶在該批發言：{"是" if participated else "否；不能因此判定遵守語體"}\n\n這位住戶的檢查提示：\n' + ('\n'.join('• '+note for note in notes) if notes else '未命中目前檢查項目；不代表完整人格品質已通過。') + '\n\n檢查針對常見直接稱呼、敬語句尾及未附圖的看見聲明，可能漏判或誤判，不是完整日文語法判定。引用不當成直接稱呼。原始回覆保留，不自動重試或改寫，也不因這些提示關閉全部 AI。此頁只讀本機紀錄，不呼叫 API。'
         sections = [
             ("目前套用設定", current_text(character)),
             ("最近準備送出", diagnostic),
@@ -770,6 +777,7 @@ class MainWindow(QMainWindow):
             ("外貌與身分", json.dumps({"identity": character.identity, "appearance": character.appearance}, ensure_ascii=False, indent=2)),
             ("關係／世界線", json.dumps({"active_worldline": self.worldline, "relationships": character.relationships}, ensure_ascii=False, indent=2)),
             ("待補欄位", "\n".join(character.pending_details) or "本次未列出特定待補項目；未提供的資料仍保留未知。"),
+            ("最近回覆檢查", reply_check),
         ]
         current_editor = None
         for title, text in sections:

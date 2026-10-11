@@ -13,7 +13,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMessageBox
 
 from our_little_days.ai_cost import AIConfig, AIError, UsageLedger, cost_units
-from our_little_days.ai_engine import ChangeGate, build_payload, save_turn, validate_turn
+from our_little_days.ai_engine import ChangeGate, build_payload, reply_quality_notes, save_turn, validate_turn
 from our_little_days.capture import DemoBackend, UnsupportedBackend
 from our_little_days.models import load_characters
 from our_little_days.ui import MainWindow
@@ -678,10 +678,11 @@ def test_final_generation_review_uses_current_saved_shogo_after_full_history(sto
     current=replace(shogo,user_address='月',tone='自然日文常體，較少使用敬語。')
     store.save_character(current)
     payload,upper=build_payload(AIConfig(),store.load_characters(),store,'main','user_reply')
-    assert len(payload['messages'])==3 and payload['messages'][-1]['role']=='system'
-    review=payload['messages'][-1]['content']
+    assert [m['role'] for m in payload['messages']]==['system','user','system','user']
+    review=payload['messages'][2]['content']
     assert '"user_address": "月"' in review and '自然日文常體' in review
-    assert '不是聖護直接叫使用者的稱呼' in review and '小鳥ちゃん' in review
+    assert '各 speaker_id 只使用自己那列' in review and '小鳥ちゃん' in review
+    assert '常体を使い、丁寧語・敬語で話さない' in review
     assert '喜歡主動表達愛意' in review and '真的表現不喜歡' in review
     assert '"self_reference": "僕"' in review and '柔和不等於溫柔' in review
     assert '第一季槙島聖護' in review and '已確認戀人的世界線' in review
@@ -689,6 +690,8 @@ def test_final_generation_review_uses_current_saved_shogo_after_full_history(sto
     context=json.loads(payload['messages'][1]['content'][0]['text'])
     assert len(context['characters'])==13 and len(context['recent_chat'])==60
     assert len(store.messages())==65 and current.source_text==shogo.source_text
+    assert all(row['voice_note']['do_not_imitate_voice'] for row in context['recent_chat'])
+    assert all('voice_note' not in row for row in store.messages())
 
 
 def test_successful_request_diagnostic_matches_prepared_profile_without_keys_or_chat(app,store,monkeypatch):
@@ -708,6 +711,98 @@ def test_successful_request_diagnostic_matches_prepared_profile_without_keys_or_
         finally:reopened.close()
     finally:
         window.close();app.processEvents()
+
+
+def test_current_input_is_last_message_without_losing_history_or_all_voices(store):
+    old=store.append_message(speaker_id='shogo',speaker_name='聖護',text='はい、小鳥ちゃん、こちらの画面は確かに見えております。',source_kind='ai')
+    store.append_message(speaker_id='user',speaker_name='月鹿',text='舊輸入')
+    transient={'kind':'voice_transcript','text':'月って呼んで','saved':False}
+    payload,upper=build_payload(AIConfig(),store.load_characters(),store,'main','user_reply',current_input=transient)
+    context=json.loads(payload['messages'][1]['content'][0]['text'])
+    focus=json.loads(payload['messages'][-1]['content'])
+    assert focus['current_user_input']==transient and not focus['visual_evidence']['image_attached']
+    assert context['recent_chat'][0]['id']==old['id'] and context['recent_chat'][0]['text']==old['text']
+    assert context['recent_chat'][0]['voice_note']['preserve_event_and_reply_chain']
+    assert len(context['characters'])==13 and upper==len(json.dumps(payload,ensure_ascii=False).encode())+2048
+    assert 'voice_note' not in store.messages()[0]
+    payload,_=build_payload(AIConfig(),store.load_characters(),store,'main','user_reply')
+    assert json.loads(payload['messages'][-1]['content'])['current_user_input']['text']=='舊輸入'
+    payload,_=build_payload(AIConfig(),store.load_characters(),store,'main','quiet_chat')
+    assert json.loads(payload['messages'][-1]['content'])['current_user_input'] is None
+
+
+@pytest.mark.parametrize('text', ['月、僕はここにいるよ。', 'REOは「はい、小鳥ちゃん、ご安心ください」と言った。', '画面は見えていない。', '画面が見えてるとは言えない。', '君の気持ちが見えてる。', '僕は本をずっと読んでる。'])
+def test_reply_advisories_do_not_flag_plain_voice_quotes_or_absent_visuals(store,text):
+    profiles=store.load_characters()
+    shogo=next(c for c in profiles if c.id=='shogo')
+    assert reply_quality_notes(shogo,text,profiles,image_attached=False)==[]
+
+
+def test_screenshot_reply_mixups_are_advisory_not_rewritten_and_worldline_isolated(store):
+    profiles=store.load_characters()
+    original=[asdict(c) for c in profiles]
+    native='はい、小鳥ちゃん、こちらの画面は確かに見えております。ご安心ください。'
+    value={'meaningful':False,'event_key':'','summary':'','important':False,'read_character_ids':[],
+           'messages':[{'speaker_id':'shogo','recipient_ids':['user'],'reply_to_index':None,'reply_to_message_id':None,'segments':[{'kind':'speech','text':native,'translation':'是的，小鳥ちゃん，我確實看見畫面。請放心。'}]}]}
+    records=save_turn(store,'main',validate_turn(response(value),profiles,'user_reply'),profiles,'user_reply',image_attached=False,response_model='provider-reported-model')
+    diagnostic=store.reply_diagnostic('main')
+    assert diagnostic['image_attached'] is False and diagnostic['provider_model']=='provider-reported-model'
+    assert diagnostic['message_ids']==[records[0]['id']] and diagnostic['replied_character_ids']==['shogo']
+    notes=diagnostic['warnings'][0]['notes']
+    assert len(notes)==3 and '小鳥ちゃん' in notes[0] and '敬語' in notes[1] and '未附圖' in notes[2]
+    assert records[0]['text'].startswith(native) and store.messages()[0]['text']==records[0]['text']
+    assert [asdict(c) for c in store.load_characters()]==original and not store.reply_diagnostic('glasshouse')
+    assert 'translation' not in diagnostic and 'source_text' not in diagnostic
+    from our_little_days.storage import SQLiteStore
+    reopened=SQLiteStore(store.path)
+    try:assert reopened.reply_diagnostic('main')==diagnostic
+    finally:reopened.close()
+    reo=next(c for c in profiles if c.id=='reo')
+    assert reply_quality_notes(reo,native,profiles,image_attached=True)==[]
+    assert len(reply_quality_notes(reo,native,profiles,image_attached=False))==1
+
+
+def test_reply_advisory_keeps_enabled_modes_and_uses_one_request(app,store,monkeypatch):
+    from our_little_days import ai_ui
+    from PySide6.QtWidgets import QDialog,QTabWidget
+    window=MainWindow(UnsupportedBackend(),store.load_characters(),store)
+    try:
+        setup_fake(window,monkeypatch)
+        c=window.ai
+        for kind in ('screen_test','reply_test'):
+            rid,_=c.ledger.reserve(c.config,kind,100)
+            c.ledger.settle(rid,{'prompt_tokens':10,'completion_tokens':10},'offline')
+            c.ledger.mark_test(c.config,kind,rid)
+        c.enable(True); c.autonomous=c.quiet_enabled=True; c.refresh()
+        calls=[]
+        def fake(key,payload,cancelled):
+            calls.append(payload)
+            value=turn(); value['messages']=value['messages'][:1]
+            value['messages'][0].update(speaker_id='shogo',recipient_ids=['user'],reply_to_index=None,reply_to_message_id=None)
+            value['messages'][0]['segments']=[{'kind':'speech','text':'はい、小鳥ちゃん、こちらの画面は確かに見えております。','translation':'是的，小鳥ちゃん，我確實看見畫面。'}]
+            raw=response(value); raw['model']='gpt-4.1-mini-test-report'
+            return raw
+        monkeypatch.setattr(ai_ui,'request_api',fake)
+        window.chat_input.setPlainText('有看到畫面嗎')
+        QTest.mouseClick(window.send_button,Qt.MouseButton.LeftButton)
+        wait(lambda:c.worker is None)
+        assert len(calls)==1 and c.enabled and c.autonomous and c.quiet_enabled
+        assert '回覆檢查提示' in c.last_note and '沒有自動重試' in c.last_note
+        assert c.ledger.totals()['month']['requests']==3 and c.ledger.totals()['month']['uncertain_twd']==0
+        assert store.reply_diagnostic('main')['image_attached'] is False
+        window.character_combo.setCurrentIndex(11)
+        viewed=[]
+        def inspect(dialog):
+            tabs=dialog.findChild(QTabWidget)
+            assert tabs.tabText(6)=='最近回覆檢查'
+            text=tabs.widget(6).toPlainText()
+            assert 'gpt-4.1-mini-test-report' in text and '本次實際附圖：否' in text and '其他角色的稱呼' in text
+            viewed.append(True)
+            return QDialog.DialogCode.Accepted
+        monkeypatch.setattr(QDialog,'exec',inspect)
+        window.inspect_character()
+        assert viewed and len(calls)==1
+    finally:window.close();app.processEvents()
 
 
 @pytest.mark.parametrize('bad_readers', [['不存在的住戶'], ['reo','reo'], 'reo', [None]])

@@ -107,6 +107,30 @@ def jpeg_url(image):
     return 'data:image/jpeg;base64,' + base64.b64encode(bytes(data)).decode()
 
 
+def reply_quality_notes(character, text, characters, *, image_attached=None):
+    """Advisory checks on direct speech, not censorship or a Japanese parser."""
+    direct = re.sub(r'「[^」]*」|『[^』]*』|“[^”]*”', '', text)
+    notes = []
+    if character.id=='shogo':
+        other_addresses = {c.user_address for c in characters if c.id!='shogo' and c.user_address and c.user_address!=character.user_address}
+        for address in sorted(other_addresses):
+            if re.search(r'(?:^|[。！？!?\n])\s*(?:はい[、，,\s]*)?'+re.escape(address)+r'(?:[、，,\s。！？!?]|$)', direct):
+                notes.append('直接使用其他角色的稱呼：'+address)
+        if '不使用敬語' in (character.language_rules or {}).get('register', ''):
+            if re.search(r'(?:です|ます|ません|ございます|ください|おります|いたします)(?:[。！？!?、，,\s]|$)', direct):
+                notes.append('出現丁寧語／敬語句尾；目前設定為常體、不使用敬語')
+    if image_attached is False:
+        for sentence in re.split(r'[。！？!?\n]', direct):
+            screen = re.search(r'畫面|螢幕|画面|スクリーン', sentence)
+            affirmative = re.search(r'確實看[到見]|當然看(?:[到見]|得見)|一直(?:盯|看)|見えて(?:ます|います|おります|る)|確かに見え|認識しております', sentence)
+            negative = re.search(r'沒有|沒看|看不到|看不見|未收到|届いていない|見えない|見えていない|見えていません|わけではない|とは言えない|とはいえない', sentence)
+            standalone = re.match(r'\s*(?:おっと[、，,\s]*)?見えて(?:ます|います|る)(?:よ)?\s*$', sentence)
+            if affirmative and not negative and (screen or standalone):
+                notes.append('本次未附圖，卻出現看見目前畫面的肯定描述')
+                break
+    return notes
+
+
 def build_payload(config, characters, store, worldline, kind, image=None, selected=None, current_input=None):
     config.validate()
     if len(characters) != 13 or len({c.id for c in characters}) != 13 or any(not c.source_text for c in characters):
@@ -118,6 +142,13 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
     # Quotes already in recent_chat need not be charged for twice.
     ongoing['anchor_messages'] = [m for m in ongoing['anchor_messages'] if m['id'] not in recent_ids]
     ongoing['state'] = {key: value for key, value in ongoing['state'].items() if key not in {'recent_batch_signatures', 'next_quiet_at'}}
+    by_id = {c.id:c for c in characters}
+    for row in [*recent, *ongoing['anchor_messages']]:
+        if row['source_kind']=='ai' and row['speaker_id'] in by_id:
+            native = '\n'.join(line for line in row['text'].splitlines() if not line.strip().startswith(('（','(')))
+            notes = reply_quality_notes(by_id[row['speaker_id']], native, characters)
+            if notes:
+                row['voice_note'] = {'do_not_imitate_voice':True, 'advisory':notes, 'preserve_event_and_reply_chain':True}
     # Send every saved profile in full, including original source_text. No cost truncation.
     context = {'task': kind, 'active_worldline': worldline, 'apartment': apartment,
                'global_original_rules': files('our_little_days').joinpath('data/global_character_rules.txt').read_text(encoding='utf-8'),
@@ -151,12 +182,21 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
     schema = response_schema(characters, kind, selected, exposed_speakers)
     review = '生成前逐則核對 speaker_id 自己的稱呼、語氣與完整人格；不要讓前一位角色或歷史錯誤代替目前設定。每段 text 只含母語，translation 只翻譯一次；不沿用歷史的重複翻譯。已讀只標記本輪明確安排閱讀的住戶，不因人格齊全而全選。核對過程不輸出，只回傳指定 JSON。'
     shogo = next(c for c in characters if c.id == 'shogo')
-    reo = next(c for c in characters if c.id == 'reo')
     review += '\n聖護目前保存的稱呼與行為：' + json.dumps({'user_address': shogo.user_address, 'tone': shogo.tone, 'self_reference': shogo.self_reference, 'language_rules': shogo.language_rules, 'behavior': list(shogo.behavior)}, ensure_ascii=False)
     review += '\n聖護直接稱呼使用者時，以目前 user_address 為準；保留後台原文中的較早稱呼不是本次更新被撤銷。維持第一季槙島聖護的思考方式與自然日文，不套用 REO 的全敬語客服模板，不必每句稱呼。'
-    if reo.user_address and reo.user_address != shogo.user_address:
-        review += '\n' + json.dumps(reo.user_address, ensure_ascii=False) + ' 是 REO 的稱呼，不是聖護直接叫使用者的稱呼；可以引用或討論 REO 的話，但不要將它當成聖護自己的愛稱。'
-    payload = {'model': config.model, 'messages': [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': content}, {'role': 'system', 'content': review}],
+    active_voices = {c.id:{'user_address':c.user_address, 'self_reference':c.self_reference, 'language':c.language, 'tone':c.tone, 'language_rules':c.language_rules} for c in characters}
+    review += '\n目前有效語體表（各 speaker_id 只使用自己那列；原始後台與 voice_note 標記的歷史均不能覆蓋）：'+json.dumps(active_voices, ensure_ascii=False)
+    review += '\n本次圖像證據：'+json.dumps(context['visual_evidence'], ensure_ascii=False)+'。未附圖時，回應「有看到畫面嗎」要承認這次沒有收到圖片；不是沿用以前角色的看見聲明。'
+    if shogo.language.startswith('ja') and '不使用敬語' in (shogo.language_rules or {}).get('register',''):
+        review += '\nspeaker_id=shogo の台詞と地の文：常体を使い、丁寧語・敬語で話さない。柔らかな語調でも優しい従順な人物に作り替えない。少し意地悪なところと第一期の槙島聖護の独立した判断を保つ。呼び方と一人称は上の shogo の行に従う。他の住人の呼び方や口調を借りない。引用は引用として区別する。'
+    request_input = current_input
+    if kind=='user_reply' and request_input is None:
+        latest = next((r for r in reversed(recent) if r['speaker_id']=='user' and r['source_kind'] in {'user','voice'}), None)
+        request_input = {'kind':'typed_text' if latest['source_kind']=='user' else 'voice_transcript','text':latest['text'],'saved':True} if latest else None
+    focus = {'task':kind, 'active_worldline':worldline, 'current_user_input':request_input if kind=='user_reply' else None,
+             'test_prompt':context['test_prompt'], 'visual_evidence':context['visual_evidence'],
+             'instruction':'回應這一輪的任務與目前輸入；先前聊天是保留的背景，不重演先前錯誤回答。用完整設定與目前有效語體表決定少數住戶的獨立回覆，回傳指定 JSON。'}
+    payload = {'model': config.model, 'messages': [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': content}, {'role': 'system', 'content': review}, {'role':'user','content':json.dumps(focus,ensure_ascii=False)}],
                'max_completion_tokens': config.max_output_tokens,
                'response_format': {'type': 'json_schema', 'json_schema': {'name': 'apartment_turn', 'strict': True, 'schema': schema}}}
     # Conservative text cap: <= one token per UTF-8 byte + structural overhead.
@@ -249,7 +289,7 @@ def event_seen(store, worldline, key):
     return any(json.loads(e['evidence_json']).get('ai_event_key', '').strip().casefold() == normalized for e in store.events(worldline))
 
 
-def save_turn(store, worldline, turn, characters, kind, user_message_id="latest", *, quiet_cooldown=6):
+def save_turn(store, worldline, turn, characters, kind, user_message_id="latest", *, quiet_cooldown=6, image_attached=None, response_model=None):
     if kind == 'screen_test':
         return []
     if kind == 'screen_event' and (not turn['meaningful'] or event_seen(store, worldline, turn['event_key'])):
@@ -296,6 +336,17 @@ def save_turn(store, worldline, turn, characters, kind, user_message_id="latest"
             cursor = store.connection.execute('INSERT INTO messages(worldline_id,speaker_id,speaker_name,text,translation,recipient_ids_json,reply_to,source_kind,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
               (worldline, c.id, f'{c.icon} {c.name}', text, '', json.dumps(m['recipient_ids']), reply, 'ai', now))
             records.append(dict(store.connection.execute('SELECT * FROM messages WHERE id=?', (cursor.lastrowid,)).fetchone()))
+        if records:
+            warnings = []
+            for m, record in zip(turn['messages'], records):
+                notes = reply_quality_notes(ids[m['speaker_id']], '\n'.join(s['text'] for s in m['segments']), characters, image_attached=image_attached)
+                if notes:
+                    warnings.append({'character_id':m['speaker_id'], 'message_id':record['id'], 'notes':notes})
+            diagnostic = {'completed_at':now, 'kind':kind, 'worldline':worldline,
+                          'provider_model':response_model if isinstance(response_model,str) and len(response_model)<=256 else None,
+                          'image_attached':image_attached, 'message_ids':[r['id'] for r in records], 'replied_character_ids':list(dict.fromkeys(r['speaker_id'] for r in records)), 'warnings':warnings}
+            store.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                     ('ai-reply-diagnostic:'+worldline,json.dumps(diagnostic,ensure_ascii=False)))
         if kind == 'user_reply' and anchor:
             row = store.connection.execute('SELECT value FROM settings WHERE key=?', ('roster:'+worldline,)).fetchone()
             previous_status = json.loads(row[0]) if row else {}

@@ -1,5 +1,16 @@
 # Windows 試用包交付與驗證
 
+## 聖護生成語體、本輪輸入與回覆診斷 0.4.7
+
+- 下載：[Windows 自主陪伴 0.4.7](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.7-preview.zip)，私人 GitHub 檔案頁按 View raw；原十二個 ZIP 保留。
+- 大小：59,125,998 bytes；SHA-256：`dd44f87bcaca9d8ade1b2da80d3c18d73b2d6452780cb03713305d50c7fc1a6d`；EXE SHA-256：`8ecd68a835b10f4a9469d8c2b5aff6f8daabd7c8d6e96bbcae6f15bcd3338e40`。
+- 使用者免費檢查提供本機與 09:58:20 準備內容，均為月／僕／柔和常體、不使用敬語，但 09:58 回覆仍用 REO 小鳥ちゃん與敬語。資料未漏更新；未取得使用者原始平台回應，不宣稱已證明所有生成偏差的單一原因。實際 transport 發送相同 payload，沒有正式 canned 回覆或擅自重寫欄位；歷史中錯誤口吻可能影響生成。
+- 完整資料之後加各角色目前獨立語體表、聖護日文常體提醒，最後另放當前輸入與真正附圖狀態。命中錯誤直接稱呼／敬語的歷史只加入不可模仿口吻的臨時註記，完整原文、ID、接話／記憶保留；SQLite 歷史不重寫。人格 JSON 十三份與 0.4.6 逐位元組一致，所有 AU 保留。
+- 新的非阻斷本機回覆檢查提示聖護混用其他住戶稱呼／常見敬語句尾及未附圖卻肯定看見當前畫面，引用排除，有限規則可能誤判或漏判。保存 API 回報模型／實際附圖／參與者及提示至各世界線獨立 settings，與聊天同交易；不保存 Key／圖片／完整回應副本。最近回覆檢查頁免費查看，未命中及未發言不宣稱人格通過，舊版不回溯補結果。提示不改寫原回覆、不關所有 AI、不額外呼叫或自動重試；原格式、世界線、API／預算安全錯誤仍停止。
+- 最大輸出 2000、同批一次 API，共用 NT$500 月額與原自訂日額／冷卻沿用；語體表／本輪輸入全部計入保守預留。不刪完整人格、不重置記憶、不要求重做已成功成本測試，不付款或加值。
+- **182 passed、2 Windows-only skipped**；人格稽核、依賴與 Qt smoke／本機封裝檢查通過。新增涵蓋當前輸入在完整歷史之後、歷史註記不寫回、常體／引用／否定畫面／非畫面比喻、錯口吻原文保留與診斷隔離／重開、一次模擬請求結算後所有模式仍啟用、免費檢查頁顯示平台回報模型與附圖。
+- Linux + Wine 真正 Windows frozen EXE 的 21 項封裝檢查通過，包括新語體／當前輸入布局與非阻斷診斷、原 roster／圖片容量／DPAPI／SQLite／官方二進位來源／公開 tiny 語音。**沒有真實付費 API；原生 Windows 0.4.7 與正式模型口吻品質未測，不能保證每次遵守。**
+
 ## 本輪住戶狀態、翻譯重複與畫面容量 0.4.6
 
 - 下載：[Windows 自主陪伴 0.4.6](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.6-preview.zip)，私人 GitHub 檔案頁按 View raw；原十一個 ZIP 保留。

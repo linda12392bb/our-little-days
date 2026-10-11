@@ -217,6 +217,10 @@ class SQLiteStore:
         row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('ai-persona-preparation:'+worldline,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def reply_diagnostic(self, worldline):
+        row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('ai-reply-diagnostic:'+worldline,)).fetchone()
+        return json.loads(row[0]) if row else {}
+
     def set_relationship(self, character_id, worldline, relation, *, confirmed=False):
         if not confirmed:
             raise StorageError("修改角色關係需要使用者確認。")
