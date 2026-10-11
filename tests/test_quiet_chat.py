@@ -12,7 +12,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QMessageBox
 
 from our_little_days.ai_cost import AIConfig, AIError, QuietBudgetExhausted, UsageLedger
-from our_little_days.ai_engine import build_payload, save_turn, validate_turn
+from our_little_days.ai_engine import PeerConversationError, build_payload, save_turn, validate_turn
 from our_little_days.capture import UnsupportedBackend
 from our_little_days.storage import SQLiteStore
 from our_little_days.ui import MainWindow
@@ -105,6 +105,107 @@ def test_quiet_requires_explicit_enable_then_one_request_for_peer_chat_no_image(
     assert not store.events() and not store.memories()
     assert c.ledger.quiet_today() > 0
     assert not c.quiet_tick() and len(calls) == 1
+
+
+@pytest.mark.parametrize('kind',['quiet_chat','quiet_test','screen_event'])
+def test_autonomous_schema_addresses_residents_and_preserves_user_history_as_background(store,kind):
+    user=store.append_message(speaker_id='user',speaker_name='月',text='早安，今天一起待著。')
+    first=save_turn(store,'main',conversation(),store.load_characters(),'quiet_chat')
+    payload,_=build_payload(AIConfig(),store.load_characters(),store,'main',kind,
+                            image=QImage(64,64,QImage.Format.Format_RGB32) if kind=='screen_event' else None)
+    context=json.loads(payload['messages'][1]['content'][0]['text'])
+    focus=json.loads(payload['messages'][-1]['content'])
+    assert context['resident_conversation']['active'] and focus['conversation_mode']=='resident_to_resident'
+    assert context['current_user_input'] is None and focus['current_user_input'] is None
+    assert any(row['id']==user['id'] and row['text']==user['text'] for row in context['recent_chat'])
+    assert [t['message_id'] for t in context['resident_conversation']['recent_peer_threads']]==[r['id'] for r in first]
+    assert '舊使用者訊息只作背景' in focus['instruction'] and '自行選擇話題' in focus['instruction']
+    root=payload['response_format']['json_schema']['schema']
+    for array in root['properties']['messages']['anyOf']:
+        for variant in array['items']['anyOf']:
+            fields=variant['properties'];recipients=fields['recipient_ids']
+            assert recipients['minItems']>=1 and 'user' not in recipients['items']['enum']
+            ref=fields['reply_to_message_id']
+            if '$ref' in ref:
+                assert user['id'] not in root['$defs'][ref['$ref'].split('/')[-1]]['enum']
+    assert len(context['characters'])==13 and payload['max_completion_tokens']==2000
+    if kind=='screen_event':assert any(p['type']=='image_url' for p in payload['messages'][1]['content'])
+
+
+@pytest.mark.parametrize('kind',['quiet_chat','quiet_test','screen_event'])
+@pytest.mark.parametrize('recipients',[['user'],[],['order'],['order','rixo'],['rixo','user']])
+def test_autonomous_does_not_accept_user_only_or_self_target_as_peer_chat(store,kind,recipients):
+    value=conversation();value['messages']=value['messages'][:1];value['messages'][0]['recipient_ids']=recipients
+    if kind=='screen_event':value.update(meaningful=True,event_key='本機事件',summary='本機測試事件')
+    with pytest.raises(PeerConversationError,match='其他住戶'):
+        validate_turn(result(value),store.load_characters(),kind,store=store)
+    assert not store.messages() and not store.events()
+
+
+def test_idle_opening_delayed_comeback_and_third_resident_continue_without_user_input(quiet_window,store,monkeypatch):
+    import our_little_days.ai_ui as ui
+    w,clock,calls=quiet_window;c=w.ai
+    original_profiles=store.load_characters();store.add_memory('既有記憶保持',character_id='light')
+    ids=[]
+    def fake(key,payload,cancelled):
+        calls.append(payload);context=json.loads(payload['messages'][1]['content'][0]['text'])
+        value=conversation()
+        if len(calls)==1:
+            value['messages']=[{'speaker_id':'light','recipient_ids':['order'],'reply_to_index':None,'reply_to_message_id':None,
+                                'segments':[{'kind':'speech','text':'本機開話題測試，序，你怎麼想？','translation':''}]}]
+        else:
+            assert any(t['message_id']==ids[0] for t in context['resident_conversation']['recent_peer_threads'])
+            value['messages']=[{'speaker_id':'order','recipient_ids':['light'],'reply_to_index':None,'reply_to_message_id':ids[0],
+                                'segments':[{'kind':'speech','text':'ほんま、まだその話しとるんか♡','translation':'真的，還在說那件事呀♡'}]},
+                               {'speaker_id':'reo','recipient_ids':['order'],'reply_to_index':None,'reply_to_message_id':None,
+                                'segments':[{'kind':'speech','text':'序さん、そのお話は続いておりますよ。','translation':'序先生，那個話題還在繼續呢。'}]}]
+        return {'id':'offline-peer-test','usage':{'prompt_tokens':100,'completion_tokens':150},
+                'choices':[{'finish_reason':'stop','message':{'content':json.dumps(value,ensure_ascii=False)}}]}
+    monkeypatch.setattr(ui,'request_api',fake)
+    c.enable(True);c.quiet(True);clock[0]+=1800
+    assert c.quiet_tick();wait(lambda:c.worker is None)
+    ids.append(store.messages()[-1]['id'])
+    clock[0]+=1800;assert c.quiet_tick();wait(lambda:c.worker is None)
+    records=[r for r in store.messages() if r['source_kind']=='ai']
+    assert len(calls)==2 and len(records)==3 and not any(r['speaker_id']=='user' for r in records)
+    assert records[1]['reply_to']==records[0]['id'] and records[2]['reply_to']==records[1]['id']
+    assert [json.loads(r['recipient_ids_json']) for r in records]==[['order'],['light'],['order']]
+    assert not store.events() and store.load_characters()==original_profiles
+    assert store.memories()[0]['content']=='既有記憶保持'
+    reopened=SQLiteStore(store.path)
+    try:
+        assert reopened.messages()==store.messages() and not reopened.conversation_context('glasshouse')['anchor_messages']
+        assert reopened.conversation_state('main')['participants']==['light','order','reo']
+    finally:reopened.close()
+
+
+def test_invalid_peer_batch_pauses_only_quiet_and_queued_user_gets_reply_without_retry(quiet_window,store,monkeypatch):
+    import threading
+    import our_little_days.ai_ui as ui
+    w,clock,calls=quiet_window;c=w.ai;entered=threading.Event();release=threading.Event()
+    def fake(key,payload,cancelled):
+        calls.append(payload);context=json.loads(payload['messages'][1]['content'][0]['text'])
+        value=conversation();value['messages']=value['messages'][:1]
+        value['messages'][0].update(recipient_ids=['user'],reply_to_index=None,reply_to_message_id=None)
+        if context['task']=='quiet_chat':
+            entered.set()
+            while not release.wait(.01):
+                if cancelled():raise AIError('cancelled mock')
+        else:assert context['task']=='user_reply' and context['current_user_input']['text']=='蛤？'
+        return {'id':'offline-target-test','usage':{'prompt_tokens':100,'completion_tokens':120},
+                'choices':[{'finish_reason':'stop','message':{'content':json.dumps(value)}}]}
+    monkeypatch.setattr(ui,'request_api',fake)
+    c.enable(True);c.quiet(True);c.autonomous=True;clock[0]+=1800
+    assert c.quiet_tick();wait(entered.is_set)
+    w.chat_input.setPlainText('蛤？');w.send_message();assert c.pending_user
+    release.set();wait(lambda:len(calls)==2 and c.worker is None)
+    assert c.enabled and c.autonomous and not c.quiet_enabled
+    assert [json.loads(p['messages'][1]['content'][0]['text'])['task'] for p in calls]==['quiet_chat','user_reply']
+    records=[r for r in store.messages() if r['source_kind'] in {'ai','user'}]
+    assert len(records)==2 and records[0]['speaker_id']=='user'
+    assert records[1]['reply_to']==records[0]['id']
+    assert c.ledger.totals()['month']['requests']==4 and c.ledger.quiet_today()>0
+    clock[0]+=36000;assert not c.quiet_tick() and len(calls)==2
 
 
 def test_busy_user_typing_voice_preview_and_speech_postpone_quiet(quiet_window):

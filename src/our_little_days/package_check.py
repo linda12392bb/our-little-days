@@ -227,6 +227,95 @@ def _check_manual_buttons(window):
         c.pause()
 
 
+def _check_autonomous_peer_router(window):
+    """Run actual idle scheduling and cross-batch routing with a local fake API."""
+    from datetime import datetime, timedelta, timezone
+    import time
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QMessageBox
+    from . import ai_ui, ai_engine, ai_cost
+    c = window.ai
+    originals = (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
+                 c.keys.read, c.keys.exists, c.config, c.clock,
+                 ai_ui.taipei_now, ai_engine.taipei_now, ai_cost.taipei_now)
+    profiles = window.store.load_characters()
+    memories, events = window.store.memories(), window.store.events()
+    baseline = len(window.store.messages())
+    clock, calls, first_id = [0], [], []
+    base = datetime.now(timezone(timedelta(hours=8)))
+    def now():
+        return base + timedelta(seconds=clock[0])
+    def wait():
+        deadline = time.monotonic() + 10
+        while c.worker is not None and time.monotonic() < deadline:
+            QTest.qWait(10)
+        assert c.worker is None
+    def fake(key, payload, cancelled):
+        calls.append(payload)
+        context = json.loads(payload['messages'][1]['content'][0]['text'])
+        task = context['task']
+        assert len(context['characters']) == 13 and payload['max_completion_tokens'] == 2000
+        assert len(payload['messages'][1]['content']) == 1
+        def message(speaker, recipient, text, translation='', reply=None):
+            return {'speaker_id': speaker, 'recipient_ids': [recipient], 'reply_to_index': None,
+                    'reply_to_message_id': reply,
+                    'segments': [{'kind': 'speech', 'text': text, 'translation': translation}]}
+        if len(calls) == 1:
+            assert task == 'quiet_chat' and context['current_user_input'] is None
+            assert context['resident_conversation']['active']
+            messages = [message('light', 'order', '本機測試，序，你怎麼想？')]
+        elif len(calls) == 2:
+            assert task == 'quiet_chat' and context['current_user_input'] is None
+            assert any(t['message_id'] == first_id[0] for t in context['resident_conversation']['recent_peer_threads'])
+            messages = [message('order', 'light', 'まだその話しとるんか♡', '還在說那件事呀♡', first_id[0]),
+                        message('reo', 'order', 'そのお話は続いておりますよ。', '那個話題還在繼續呢。')]
+        else:
+            assert len(calls) == 3 and task == 'user_reply'
+            assert context['current_user_input']['text'] == '蛤？'
+            assert not context['resident_conversation']['active']
+            messages = [message('order', 'user', '月ちゃん、どうしたん？', '月ちゃん，怎麼了？')]
+        value = {'meaningful': False, 'event_key': '', 'summary': '', 'important': False, 'messages': messages}
+        return {'id': 'offline-idle-router-test', 'usage': {'prompt_tokens': 100, 'completion_tokens': 150},
+                'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(value, ensure_ascii=False)}}]}
+    try:
+        ai_ui.request_api = fake
+        QMessageBox.warning = lambda *a: None
+        QMessageBox.information = lambda *a: None
+        c.keys.read, c.keys.exists = lambda: 'mock-key-only', lambda: True
+        c.config = replace(c.config, transmission_approved=True, max_output_tokens=2000)
+        c.clock = lambda: clock[0]
+        ai_ui.taipei_now = ai_engine.taipei_now = ai_cost.taipei_now = now
+        c.activity()
+        assert not c.quiet_enabled and c.quiet_timer.interval() == 180000
+        c.enable(True)
+        c.quiet(True)
+        clock[0] += 1800
+        assert c.quiet_tick()
+        wait()
+        first_id.append(window.store.messages()[-1]['id'])
+        clock[0] += 1800
+        assert c.quiet_tick()
+        wait()
+        records = window.store.messages()[baseline:]
+        assert len(records) == 3 and [r['speaker_id'] for r in records] == ['light', 'order', 'reo']
+        assert records[1]['reply_to'] == records[0]['id'] and records[2]['reply_to'] == records[1]['id']
+        assert [json.loads(r['recipient_ids_json']) for r in records] == [['order'], ['light'], ['order']]
+        window.chat_input.setPlainText('蛤？')
+        window.send_message()
+        wait()
+        assert len(calls) == 3 and c.enabled and c.quiet_enabled
+        latest = window.store.messages()[-2:]
+        assert latest[0]['speaker_id'] == 'user' and latest[1]['reply_to'] == latest[0]['id']
+        assert c.ledger.quiet_today() > 0
+        assert window.store.load_characters() == profiles
+        assert window.store.memories() == memories and window.store.events() == events
+    finally:
+        (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
+         c.keys.read, c.keys.exists, c.config, c.clock,
+         ai_ui.taipei_now, ai_engine.taipei_now, ai_cost.taipei_now) = originals
+        c.pause()
+
+
 def check_package(speech_test_dir=None):
     from PySide6.QtWidgets import QApplication
     from .capture import DemoBackend
@@ -362,6 +451,8 @@ def check_package(speech_test_dir=None):
             assert store.conversation_context('main')['anchor_messages']
             assert not store.conversation_context('glasshouse')['anchor_messages']
             _check_manual_buttons(window)
+            _check_autonomous_peer_router(window)
+            checks.append('frozen actual quiet scheduler opens light-to-order topic, later order replies to historical light ID and REO joins; typed user interrupts idle routing; all personas/memory preserved, one mock request per batch, no network')
             checks.append('frozen manual reply button works while AI paused; strict selected ID schema, safe failure dialog with settled usage and success dialog verified with mock provider, no network or retry')
             checks.append('frozen quiet_test button creates light-to-order-to-reo peer replies in one mock request; null model indexes resolved locally to prior explicit recipients and persisted; scheduler remains OFF')
             checks.append('frozen send button replies immediately to pinned typed input while quiet mode remains ON; history-ID schema couples each ID with its true speaker, no network')

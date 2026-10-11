@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QF
     QFormLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QScrollArea, QWidget)
 
 from .ai_cost import AIConfig, AIError, QuietBudgetExhausted, UsageLedger
-from .ai_engine import ChangeGate, OutputLimitReached, build_payload, save_turn, validate_turn
+from .ai_engine import ChangeGate, OutputLimitReached, PeerConversationError, build_payload, save_turn, validate_turn
 from .ai_provider import WindowsKeyStore, request_api
 from .models import taipei_now
 
@@ -73,7 +73,7 @@ class AIController(QObject):
         if not self.quiet_enabled and self.worker and self.kind == 'quiet_chat':
             self.generation += 1
             self.worker.requestInterruption()
-        self.last_note = '安靜聊天已啟用 · 不需擷取畫面，依設定間隔與額度開話題' if self.quiet_enabled else '安靜聊天已關閉 · 文字／語音回覆可繼續'
+        self.last_note = '住戶自主聊天已啟用 · 妳空閒時自行開話題、彼此接話；不需擷取畫面' if self.quiet_enabled else '住戶自主聊天已關閉 · 文字／語音回覆可繼續'
         self.refresh()
 
     def quiet_tick(self):
@@ -320,17 +320,29 @@ class AIController(QObject):
                 notes = list(dict.fromkeys(note for warning in diagnostic['warnings'] for note in warning['notes']))
                 self.last_note += ' · 回覆檢查提示：' + '；'.join(notes) + '。原回覆保留、費用已計入；沒有自動重試。'
         except Exception as exc:
-            if isinstance(exc,OutputLimitReached):
+            if isinstance(exc,PeerConversationError):
+                self.failure(str(exc), autonomous_only=True)
+            elif isinstance(exc,OutputLimitReached):
                 self.failure(f'{exc} 本次 API 回報輸出 {response["usage"]["completion_tokens"]}／設定上限 {self.request_config.max_output_tokens} tokens；輸入另計，不等於輸出超額。已暫停 AI；可免費查看「最近 API 結果」，不必調高上限。')
             else:
                 self.failure(str(exc) if isinstance(exc, AIError) else 'AI 結果儲存失敗，已停止 AI；保留用量與既有資料。')
         finally:
             self.refresh()
 
-    def failure(self, error):
+    def failure(self, error, *, autonomous_only=False):
         if self.closed:
             return
         self.ledger.abandon(self.request_id)
+        if autonomous_only:
+            if self.kind in {'quiet_chat','quiet_test'}:
+                self.quiet_enabled=False
+            elif self.kind=='screen_event':
+                self.autonomous=False
+            self.failed_request=False
+            self.last_note=error+' 已暫停這項自主聊天；文字／語音回覆與記憶保留。'
+            self.refresh()
+            self.test_failure(self.kind,self.last_note,self.request_id)
+            return
         if self.kind == 'quiet_chat' and self.request_generation != self.generation and self.enabled and not self.quiet_enabled:
             self.last_note = '安靜聊天已取消 · 保留可能費用；文字／語音回覆可繼續'
             self.failed_request = False

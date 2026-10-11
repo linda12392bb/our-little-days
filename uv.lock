@@ -52,7 +52,7 @@ wheels = [
 
 [[package]]
 name = "our-little-days"
-version = "0.4.9"
+version = "0.4.10"
 source = { editable = "." }
 dependencies = [
     { name = "opencc-python-reimplemented" },

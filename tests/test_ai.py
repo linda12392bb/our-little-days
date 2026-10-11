@@ -257,6 +257,7 @@ def test_request_schema_constrains_selected_character_and_real_reply_ids(store):
     main = store.append_message(speaker_id='user', speaker_name='月鹿', text='原始對話')
     foreign = store.append_message(speaker_id='user', speaker_name='月鹿', text='其他世界線', worldline='glasshouse')
     test = store.append_message(speaker_id='order', speaker_name='序', text='介面測試', source_kind='test')
+    peer = store.append_message(speaker_id='order',speaker_name='序',text='ほんま、気になるんやろ♡',source_kind='ai')
     payload, _ = build_payload(AIConfig(), characters, store, 'main', 'quiet_chat')
     root = payload['response_format']['json_schema']['schema']
     variants = root['properties']['messages']['anyOf'][0]['items']['anyOf']
@@ -265,9 +266,9 @@ def test_request_schema_constrains_selected_character_and_real_reply_ids(store):
     previous_ids = resolved(root,historical['reply_to_message_id'])['enum']
     assert set(resolved(root,fields['speaker_id'])['enum']) == {c.id for c in characters if c.id!='shogo'}
     assert fields['reply_to_message_id'] == {'type':'null'}
-    assert previous_ids == [main['id']]
-    assert historical['recipient_ids']['items']['enum'] == ['user']
-    assert foreign['id'] not in previous_ids and test['id'] not in previous_ids
+    assert previous_ids == [peer['id']]
+    assert historical['recipient_ids']['items']['enum'] == ['order']
+    assert main['id'] not in previous_ids and foreign['id'] not in previous_ids and test['id'] not in previous_ids
     assert [asdict(c) for c in store.load_characters()] == before
 
 

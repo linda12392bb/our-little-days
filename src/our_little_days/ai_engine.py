@@ -47,6 +47,13 @@ class OutputLimitReached(AIError):
     pass
 
 
+class PeerConversationError(AIError):
+    """A completed autonomous turn failed to address another resident."""
+
+
+RESIDENT_CONVERSATION_KINDS = {'quiet_chat', 'quiet_test', 'screen_event'}
+
+
 def shogo_voice_description(character):
     """Bind purpose and rhythm to Shogo's output field, using saved references."""
     reference = (character.language_rules or {}).get('dialogue_style_reference', {})
@@ -113,7 +120,11 @@ def response_schema(characters, kind, selected, exposed_speakers, plan=None):
     # The model supplies recipients; local persistence resolves the prior speaker.
     fields['reply_to_index'] = {'type': 'null'}
     fields['speaker_id']['enum'] = [selected] if kind == 'reply_test' else ids
-    fields['recipient_ids']['items']['enum'] = ['user', *ids]
+    resident_conversation = kind in RESIDENT_CONVERSATION_KINDS
+    fields['recipient_ids']['items']['enum'] = ids if resident_conversation else ['user', *ids]
+    if resident_conversation:
+        fields['recipient_ids'].update(minItems=1,maxItems=3)
+        fields['recipient_ids']['description']='這些 ID 是本句真正說話對象：其他住戶。台詞要回應該住戶、向他開話題或對他的觀點接話，不只是把對使用者說的台詞改標籤。不要填 user 或自己的 ID。'
     fields['segments']['minItems'] = 1
     fields['segments']['items']['properties']['text']['minLength'] = 1
     fields['reply_to_message_id'] = {'type': 'null'}
@@ -136,7 +147,7 @@ def response_schema(characters, kind, selected, exposed_speakers, plan=None):
                          'segment_kind':{'type':'string','enum':['speech','narration']}}
         fields['segments']['items']['properties']['kind']={'$ref':'#/$defs/segment_kind'}
         variants = [deepcopy(messages['items'])]
-        for speaker in ['user', *ids]:
+        for speaker in (ids if resident_conversation else ['user', *ids]):
             previous_ids = sorted(key for key, author in exposed_speakers.items() if author == speaker)
             if not previous_ids:
                 continue
@@ -239,6 +250,13 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
     # Quotes already in recent_chat need not be charged for twice.
     ongoing['anchor_messages'] = [m for m in ongoing['anchor_messages'] if m['id'] not in recent_ids]
     ongoing['state'] = {key: value for key, value in ongoing['state'].items() if key not in {'recent_batch_signatures', 'next_quiet_at'}}
+    resident_conversation = kind in RESIDENT_CONVERSATION_KINDS
+    peer_threads = [{'message_id':row['id'], 'speaker_id':row['speaker_id'],
+                     'recipient_ids':[r for r in json.loads(row['recipient_ids_json']) if r!='user' and r!=row['speaker_id']],
+                     'reply_to':row['reply_to']}
+                    for row in sorted([*recent,*ongoing['anchor_messages']],key=lambda r:r['id'])
+                    if row['source_kind']=='ai' and row['speaker_id']!='user'
+                    and any(r!='user' and r!=row['speaker_id'] for r in json.loads(row['recipient_ids_json']))][-8:]
     by_id = {c.id:c for c in characters}
     for row in [*recent, *ongoing['anchor_messages']]:
         if row['source_kind']=='ai' and row['speaker_id'] in by_id:
@@ -258,6 +276,8 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
                'recent_chat': recent,
                'requested_character': selected,
                'ongoing_conversation': ongoing,
+               'resident_conversation': {'active':resident_conversation, 'recent_peer_threads':peer_threads,
+                   'purpose':'住戶之間自行開話題或接續討論；舊使用者訊息是背景，不是新的提問' if resident_conversation else '優先回應使用者，之後可住戶互相接話'},
                'current_user_input': current_input,
                'test_prompt': '請用你自己的語言與人格，簡短回應月鹿：「今天一起待著，好嗎？」' if kind == 'reply_test' else None}
     content = [{'type': 'text', 'text': json.dumps(context, ensure_ascii=False)}]
@@ -273,8 +293,11 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
         instructions += f'\n本次只由 id={selected} 回覆測試問題，recipient_ids=["user"]，兩個 reply_to 欄位都為 null。只需一至兩句，不添加無關敘事。'
     elif kind == 'user_reply':
         instructions += '\n本次是使用者主動說話，至少一則自然回覆當下輸入。第一則 recipient_ids=["user"]，後續可住戶互相接話；所有訊息的兩個 reply_to 欄位都為 null，本機會連結當前使用者訊息及同批接話，不要填歷史訊息 ID。'
+        instructions += '\n若自然安排多人參與，後續住戶可直接回應前一位的觀點、玩笑或反駁，不把同一個答覆換人重說。不強迫每次多人成團；使用者當下的需要優先。'
     else:
         instructions += '\n引用先前訊息時，reply_to_message_id 與 recipient_ids 必須使用 schema 同一分支：對象只填該訊息真正說話者的 ID。新開話題或同批接話則 reply_to_message_id=null，切勿把歷史 ID 搭配另一位角色。'
+    if resident_conversation:
+        instructions += '\n本次是住戶之間的自主對話，不是回覆舊使用者訊息。recipient_ids 只填其他住戶，不填 user 或自己；第一位可直接向尚未發言的住戶開話題，不需等使用者介紹話題或點名。其他人依人格接話、吐槽、反駁或補充；不固定主持人，不要求十三位全出場。已有 recent_peer_threads 時可回接其真實 ID 或自然延伸內容；沒有時可從保存的興趣、新畫面事件或未完討論選題，不捏造已發生事件，不反覆詢問使用者今天想做什麼。可空批次保持安靜；單人先開話題或延遲回嘴也可以，但發言仍要有其他住戶為對象。'
     exposed_speakers = {row['id']: row['speaker_id'] for row in [*recent, *ongoing['anchor_messages']]}
     plan = output_plan(config.max_output_tokens,kind)
     schema = response_schema(characters, kind, selected, exposed_speakers,plan)
@@ -295,7 +318,8 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
         request_input = {'kind':'typed_text' if latest['source_kind']=='user' else 'voice_transcript','text':latest['text'],'saved':True} if latest else None
     focus = {'task':kind, 'active_worldline':worldline, 'current_user_input':request_input if kind=='user_reply' else None,
              'test_prompt':context['test_prompt'], 'visual_evidence':context['visual_evidence'], 'output_plan':plan,
-             'instruction':'回應這一輪的任務與目前輸入；先前聊天是保留的背景，不重演先前錯誤回答。用完整設定與目前有效語體表決定少數住戶的獨立回覆，回傳指定 JSON。'}
+             'conversation_mode':'resident_to_resident' if resident_conversation else 'respond_to_user',
+             'instruction':('讓住戶自行選擇話題、直接對其他住戶發言並互相接話；recipient_ids 只填其他住戶。延續 recent_peer_threads 的真實對話或從既有興趣／新事件開題，舊使用者訊息只作背景，不再輪流回答舊問題。不要以使用者當收尾提問對象。可自然安靜，不固定主持人或全員出場。' if resident_conversation else '回應這一輪的任務與目前輸入；先前聊天是保留的背景，不重演先前錯誤回答。若多人自然參與，允許後續住戶對彼此的觀點接話，避免每人都重複對使用者說同一件事。')+'用完整設定與目前有效語體表生成指定 JSON。'}
     payload = {'model': config.model, 'messages': [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': content}, {'role': 'system', 'content': review}, {'role':'user','content':json.dumps(focus,ensure_ascii=False)}],
                'max_completion_tokens': config.max_output_tokens,
                'response_format': {'type': 'json_schema', 'json_schema': {'name': 'apartment_turn', 'strict': True, 'schema': schema}}}
@@ -349,6 +373,8 @@ def validate_turn(response, characters, kind, selected=None, store=None, worldli
                 invalid('回覆者與所選住戶不同')
             if not isinstance(m['recipient_ids'], list) or any(r not in {*ids, 'user'} for r in m['recipient_ids']):
                 invalid(f'第 {index+1} 則訊息使用無效對象 ID')
+            if kind in RESIDENT_CONVERSATION_KINDS and ('user' in m['recipient_ids'] or c.id in m['recipient_ids'] or not m['recipient_ids']):
+                invalid(f'第 {index+1} 則自主對話必須以其他住戶為對象，而非只回使用者或自己',PeerConversationError)
             reply = m['reply_to_index']
             if kind == 'reply_test' and (m['recipient_ids'] != ['user'] or reply is not None or m.get('reply_to_message_id') is not None):
                 invalid('單次角色測試必須直接回覆使用者，不引用其他訊息')

@@ -454,7 +454,7 @@ class MainWindow(QMainWindow):
         for widget in (self.voice_save, self.voice_auto):
             widget.toggled.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
         controls_layout.addStretch()
-        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.9", "sectionTitle"))
+        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.10", "sectionTitle"))
         controls_layout.addWidget(label("聊天與角色資料永久保存在本機。\n不錄影、不存截圖。只有手動啟用 AI 後，\n選定視窗圖片與所需文字才會傳送 API。\n暫停觀察不會刪除記憶。", "hint", True))
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -465,7 +465,7 @@ class MainWindow(QMainWindow):
         controls_scroll.setWidget(controls)
         columns.addWidget(controls_scroll)
         columns.setSizes([170, 620, 285])
-        outer.addWidget(label("自主陪伴試用 0.4.9  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
+        outer.addWidget(label("自主陪伴試用 0.4.10  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
         self.update_controls()
 
     def apply_theme(self, *_):
