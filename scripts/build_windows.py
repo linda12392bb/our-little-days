@@ -107,7 +107,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.4.8",
+        "version": "0.4.9",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -119,13 +119,13 @@ def main():
         "whisper_runtime": speech_manifest,
         "windows_manual_acceptance": "not_run",
         "signing": "unsigned",
-        "scope": "One API batch can include up to 13 residents under unchanged 2000 output cap, with participant-dependent short output envelope. Local actual usage/finish/format metrics persisted for successful and truncated responses without raw content; free viewer and no retries. Full personas, SQLite/AU/peer continuity, voice corrections and shared budgets preserved. Native Windows/live model acceptance pending.",
+        "scope": "User-approved Shogo dialogue reference migrates once with backup and binds perspective, purpose and rhythm to his own generated message branch. Local advisory covers reported polite connectives and generic group reassurance; per-speaker latest checks and per-message hints persist. No automatic rewriting, additional API calls or retries; all 13 full personas and single-batch 2000 output cap, SQLite/AU/peer continuity and shared budgets preserved. Native Windows/live character quality acceptance pending.",
     }
     (folder / "BUILD_INFO.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.8-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.9-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():

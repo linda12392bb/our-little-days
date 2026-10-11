@@ -454,7 +454,7 @@ class MainWindow(QMainWindow):
         for widget in (self.voice_save, self.voice_auto):
             widget.toggled.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
         controls_layout.addStretch()
-        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.8", "sectionTitle"))
+        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.9", "sectionTitle"))
         controls_layout.addWidget(label("聊天與角色資料永久保存在本機。\n不錄影、不存截圖。只有手動啟用 AI 後，\n選定視窗圖片與所需文字才會傳送 API。\n暫停觀察不會刪除記憶。", "hint", True))
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -465,7 +465,7 @@ class MainWindow(QMainWindow):
         controls_scroll.setWidget(controls)
         columns.addWidget(controls_scroll)
         columns.setSizes([170, 620, 285])
-        outer.addWidget(label("自主陪伴試用 0.4.8  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
+        outer.addWidget(label("自主陪伴試用 0.4.9  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
         self.update_controls()
 
     def apply_theme(self, *_):
@@ -679,6 +679,11 @@ class MainWindow(QMainWindow):
         card = MessageCard(directed_name, record["text"], record["translation"], record["created_at"][11:16], character, user)
         relation = " · 接話對象：" + "、".join(next((f"{c.icon}{c.name}" for c in self.characters if c.id == ident), "月鹿") for ident in recipients) if recipients else ""
         card.setToolTip(record["created_at"] + relation + (f" · 回覆訊息 #{record['reply_to']}" if record.get("reply_to") else ""))
+        notes = self.store.message_reply_notes(record['worldline_id'], record['id']) if record['source_kind']=='ai' else []
+        if notes:
+            hint = label('回覆檢查提示：'+'；'.join(notes), 'hint')
+            hint.setWordWrap(True)
+            card.layout().addWidget(hint)
         card.apply_theme(self.night)
         row = QHBoxLayout()
         if user:
@@ -755,15 +760,17 @@ class MainWindow(QMainWindow):
         tabs = QTabWidget()
         layout.addWidget(tabs)
         def current_text(c):
+            reference = (c.language_rules or {}).get('dialogue_style_reference')
+            reference_text = '\n\n使用者確認的對話方式參考：\n'+json.dumps(reference,ensure_ascii=False,indent=2) if reference else ''
             return '\n'.join([f'平常稱呼：{c.user_address or "尚未指定"}', f'語言：{c.language}', f'自稱：{c.self_reference or "尚未指定"}', f'語氣：{c.tone or "尚未提供"}', f'發言語體：{(c.language_rules or {}).get("register", "尚未指定")}',
                               f'人格核心：{c.personality_core or "待補"}', '', '目前行為設定：', *[f'• {item}' for item in c.behavior],
-                              '', '此頁直接讀取本機已保存設定。查看不呼叫 API。原始後台頁保留舊來源；後續已確認更新以此頁為準。'])
+                              '', '此頁直接讀取本機已保存設定。查看不呼叫 API。原始後台頁保留舊來源；後續已確認更新以此頁為準。'])+reference_text
         preparation = self.store.persona_preparation(self.worldline)
         diagnostic = '這條世界線尚無新版的 AI 設定準備紀錄；舊版請求無法回溯。查看此頁不會呼叫 API。'
         if preparation:
             used = preparation['characters'].get(ident, {})
             diagnostic = f'本機準備時間：{preparation["prepared_at"]}\n世界線：{preparation["worldline"]}\n模型：{preparation["model"]}\n準備使用的稱呼：{used.get("user_address") or "尚未指定"}\n準備使用的自稱：{used.get("self_reference") or "尚未指定"}\n準備使用的語氣：{used.get("tone") or "尚未提供"}\n準備使用的語體：{(used.get("language_rules") or {}).get("register", "尚未指定")}\n\n準備使用的行為：\n' + '\n'.join('• '+b for b in used.get('behavior', [])) + '\n\n這是本機準備紀錄，不代表 API 已收到、已付費或模型已遵守；實際執行結果請看 AI 狀態與用量。'
-        result = self.store.reply_diagnostic(self.worldline)
+        result = self.store.reply_diagnostic(self.worldline, ident) or self.store.reply_diagnostic(self.worldline)
         reply_check = '這條世界線尚無新版回覆檢查紀錄；舊版結果不倒推為已檢查。查看不呼叫 API。'
         if result:
             participated = ident in result.get('replied_character_ids', [])

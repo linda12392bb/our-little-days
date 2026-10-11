@@ -47,6 +47,25 @@ class OutputLimitReached(AIError):
     pass
 
 
+def shogo_voice_description(character):
+    """Bind purpose and rhythm to Shogo's output field, using saved references."""
+    reference = (character.language_rules or {}).get('dialogue_style_reference', {})
+    return ('槙島聖護（第一期）の台詞・地の文。画面の報告係や接客係としてではなく、'
+            '自分の観察・判断・関心から話す。相手の選択に興味を持ち、必要なら問い返す、'
+            '異論を述べる、少しからかう。毎回質問や哲学の演説をする必要はない。'
+            '柔らかな常体で、一人称・呼び方は本人の保存設定に従う。'
+            '敬語の語尾だけを落とした慰めや全員の気持ちの代弁にしない。'
+            '過去の「僕たちは君との時間を大切にしていますよ」のような一律の安心保証は、'
+            'この話者の判断と会話の目的が抜けた失敗例。常体に直した同文も模倣しない。'
+            '恋人への愛情と独立した判断を両立し、本当に嫌がったらやめる。'
+            '他人の台詞の引用は本人の話し方と区別する。'
+            '\n現在の設定：'+json.dumps({'user_address':character.user_address,
+                'self_reference':character.self_reference,'register':(character.language_rules or {}).get('register'),
+                'personality_core':character.personality_core,'reference':reference},ensure_ascii=False)+
+            '\n参考例は文の運びと会話の目的を示す資料で、実際の記憶ではない。'
+            '今の入力に自分の言葉で応じ、例をそのまま毎回繰り返さない。母語のみ。')
+
+
 def output_plan(max_tokens, kind):
     """Generation guidance in characters; not a tokenizer or a completion guarantee."""
     if max_tokens >= 1600:
@@ -124,7 +143,9 @@ def response_schema(characters, kind, selected, exposed_speakers, plan=None):
             variant = deepcopy(messages['items'])
             props = variant['properties']
             props['speaker_id']={'$ref':'#/$defs/resident_id'}
-            props['reply_to_message_id'] = {'type': 'integer', 'enum': previous_ids}
+            ref_name = 'reply_ids_'+speaker
+            schema['$defs'][ref_name] = {'type': 'integer', 'enum': previous_ids}
+            props['reply_to_message_id'] = {'$ref':'#/$defs/'+ref_name}
             props['recipient_ids'] = {'type': 'array', 'minItems': 1, 'maxItems': 1,
                                       'items': {'type': 'string', 'enum': [speaker]}}
             variants.append(variant)
@@ -135,15 +156,36 @@ def response_schema(characters, kind, selected, exposed_speakers, plan=None):
         schema['properties']['event_key']['enum'] = ['']
         schema['properties']['summary']['enum'] = ['']
         schema['properties']['important']['enum'] = [False]
+    shogo = next(c for c in characters if c.id=='shogo')
+    bind_shogo = kind not in {'screen_test'} and (kind!='reply_test' or selected=='shogo')
+    if bind_shogo:
+        schema.setdefault('$defs', {})['other_resident_id']={'type':'string','enum':[i for i in ids if i!='shogo']}
     arrays=[]
-    for limits in plan['participant_ranges']:
+    for tier,limits in enumerate(plan['participant_ranges']):
         branch=deepcopy(messages)
         branch.update(minItems=limits['min_messages'],maxItems=limits['max_messages'])
-        for item in branch['items'].get('anyOf',[branch['items']]):
+        variants=branch['items'].get('anyOf',[branch['items']])
+        bound=[]
+        for item in variants:
             segments=item['properties']['segments']
             segments['maxItems']=limits['max_segments_per_message']
             segments['items']['properties']['text']['maxLength']=limits['max_native_characters_per_segment']
             segments['items']['properties']['translation']['maxLength']=limits['max_translation_characters_per_segment']
+            if bind_shogo:
+                native_segments=deepcopy(segments)
+                native_segments['items']['properties']['text']['description']=shogo_voice_description(shogo)
+                ref_name='shogo_segments_'+str(tier)
+                schema['$defs'][ref_name]=native_segments
+                dedicated=deepcopy(item)
+                dedicated['properties']['speaker_id']={'type':'string','enum':['shogo']}
+                dedicated['properties']['segments']={'$ref':'#/$defs/'+ref_name}
+                if kind!='reply_test':
+                    item['properties']['speaker_id']={'$ref':'#/$defs/other_resident_id'}
+                    bound.append(item)
+                bound.append(dedicated)
+            else:
+                bound.append(item)
+        branch['items']={'anyOf':bound} if len(bound)>1 else bound[0]
         arrays.append(branch)
     schema['properties']['messages']={'anyOf':arrays} if len(arrays)>1 else arrays[0]
     return schema
@@ -170,8 +212,10 @@ def reply_quality_notes(character, text, characters, *, image_attached=None):
             if re.search(r'(?:^|[。！？!?\n])\s*(?:はい[、，,\s]*)?'+re.escape(address)+r'(?:[、，,\s。！？!?]|$)', direct):
                 notes.append('直接使用其他角色的稱呼：'+address)
         if '不使用敬語' in (character.language_rules or {}).get('register', ''):
-            if re.search(r'(?:です|ます|ません|ございます|ください|おります|いたします)(?:[。！？!?、，,\s]|$)', direct):
+            if re.search(r'(?:です|でした|でしょう|ます|ました|ません|ましょう|ございます|ございました|ください|おります|おりました|いたします)(?:[。！？!?、，,\s]|$|よね|よ|ね|が|けど|から|ので|か|し)', direct):
                 notes.append('出現丁寧語／敬語句尾；目前設定為常體、不使用敬語')
+        if re.search(r'(?:僕たち|私たち).{0,12}(?:君|月).{0,20}(?:大切に|大事に).{0,16}(?:よ|ね|です|ます)',direct):
+            notes.append('疑似以全體住戶的安撫或保證代替自身判斷；需對照聖護人格與本輪情境')
     if image_attached is False:
         for sentence in re.split(r'[。！？!?\n]', direct):
             screen = re.search(r'畫面|螢幕|画面|スクリーン', sentence)
@@ -244,6 +288,7 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
     review += '\n本批輸出篇幅計畫：'+json.dumps(plan,ensure_ascii=False)+'。這是整批母語、敘事、繁中翻譯及 JSON 共用的輸出，不是每人額度。通常使用比上限更短的對話，預留空間結束所有陣列與物件；本輪文字簡短時通常 1–2 則。依情境自然選角色，不固定誰先說；能彼此接話。需要更多解釋時減少發言人與敘事段落，不縮減翻譯、不重複句子或欄位、不以空白填滿額度，不額外拆成多次請求。已讀未回不要附加理由。只輸出所需 JSON，不輸出人格核對或輸出計畫分析。'
     if shogo.language.startswith('ja') and '不使用敬語' in (shogo.language_rules or {}).get('register',''):
         review += '\nspeaker_id=shogo の台詞と地の文：常体を使い、丁寧語・敬語で話さない。柔らかな語調でも優しい従順な人物に作り替えない。少し意地悪なところと第一期の槙島聖護の独立した判断を保つ。呼び方と一人称は上の shogo の行に従う。他の住人の呼び方や口調を借りない。引用は引用として区別する。'
+    review += '\n聖護は自分の視点・判断と今の会話の目的を保つ。schema 内の本人専用 text の説明と保存された対話参考を参照する。口調、文の運び、考え方を一緒に選び、客服の敬語だけを外した文章にはしない。画面の内容を見ただけなら、誰かの気持ちや行動の理由を事実として断定しない。'
     request_input = current_input
     if kind=='user_reply' and request_input is None:
         latest = next((r for r in reversed(recent) if r['speaker_id']=='user' and r['source_kind'] in {'user','voice'}), None)
@@ -402,6 +447,14 @@ def save_turn(store, worldline, turn, characters, kind, user_message_id="latest"
                           'image_attached':image_attached, 'message_ids':[r['id'] for r in records], 'replied_character_ids':list(dict.fromkeys(r['speaker_id'] for r in records)), 'warnings':warnings}
             store.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
                                      ('ai-reply-diagnostic:'+worldline,json.dumps(diagnostic,ensure_ascii=False)))
+            for character_id in diagnostic['replied_character_ids']:
+                individual={**diagnostic, 'message_ids':[r['id'] for r in records if r['speaker_id']==character_id],
+                            'warnings':[w for w in warnings if w['character_id']==character_id]}
+                store.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                         ('ai-reply-diagnostic:'+worldline+':'+character_id,json.dumps(individual,ensure_ascii=False)))
+            for warning in warnings:
+                store.connection.execute('INSERT INTO settings VALUES(?,?)',
+                                         (f'ai-reply-notes:{worldline}:{warning["message_id"]}',json.dumps(warning['notes'],ensure_ascii=False)))
         if kind == 'user_reply' and anchor:
             row = store.connection.execute('SELECT value FROM settings WHERE key=?', ('roster:'+worldline,)).fetchone()
             previous_status = json.loads(row[0]) if row else {}

@@ -57,18 +57,22 @@ def _check_manual_buttons(window):
             assert schema['items']['properties']['speaker_id']['enum'] == ['order']
             assert schema['minItems'] == schema['maxItems'] == 1
         if kind == 'user_reply':
-            assert schema['minItems'] == 1 and item['properties']['reply_to_message_id'] == {'type':'null'}
+            assert schema['minItems'] == 1 and all(v['properties']['reply_to_message_id'] == {'type':'null'} for v in variants)
             assert context['current_user_input'] == {'kind':'typed_text','text':'晚安','saved':True}
             assert focus['current_user_input']==context['current_user_input']
             assert context['character_address_rules']['shogo'] == '月'
             assert context['character_address_rules']['reo'] == '小鳥ちゃん'
             assert context['visual_evidence']['image_attached'] is False
-        for variant in variants[1:]:
+        root_schema=payload['response_format']['json_schema']['schema']
+        for variant in variants:
             props = variant['properties']
+            if props['reply_to_message_id']=={'type':'null'}:
+                continue
             authors = props['recipient_ids']['items']['enum']
             assert len(authors) == 1
             exposed = {row['id']:row for row in [*context['recent_chat'], *context['ongoing_conversation']['anchor_messages']]}
-            for message_id in props['reply_to_message_id']['enum']:
+            reference=props['reply_to_message_id']
+            for message_id in root_schema['$defs'][reference['$ref'].split('/')[-1]]['enum']:
                 assert exposed[message_id]['speaker_id'] == authors[0]
         value = {'meaningful': True, 'event_key': '', 'summary': '', 'important': False, 'read_character_ids':['shogo'] if kind=='user_reply' else [],
                  'messages':[{'speaker_id':'序' if len(calls) == 1 else 'order',
@@ -248,12 +252,32 @@ def check_package(speech_test_dir=None):
         try:
             store.seed(characters, load_apartment_settings())
             shogo = next(c for c in characters if c.id == 'shogo')
-            legacy = replace(shogo, user_address='かみそりちゃん', behavior=tuple(shogo.behavior[:-6]))
+            legacy = replace(shogo, user_address='かみそりちゃん', behavior=tuple(shogo.behavior[:-6]),
+                             language_rules={k:v for k,v in shogo.language_rules.items() if k!='dialogue_style_reference'})
             store.save_character(legacy)
             assert store.apply_confirmed_shogo_address_update().is_file()
             assert store.apply_confirmed_shogo_address_update() is None
+            assert store.apply_confirmed_shogo_dialogue_reference().is_file()
+            assert store.apply_confirmed_shogo_dialogue_reference() is None
             assert json.loads(json.dumps({c.id:asdict(c) for c in store.load_characters()})) == original
             checks.append('confirmed Shogo 月 address, proactive affection and stopping unwanted interaction migrate once with backup; original source, personality and AU preserved')
+            from .ai_engine import reply_quality_notes, build_payload
+            from .ai_cost import AIConfig
+            current_shogo=next(c for c in store.load_characters() if c.id=='shogo')
+            reference=current_shogo.language_rules['dialogue_style_reference']['native']
+            assert not reply_quality_notes(current_shogo,reference,store.load_characters())
+            assert reply_quality_notes(current_shogo,'この画面はログが見えますね。読みづらいですが、背景はダークテーマです。',store.load_characters())
+            voice_payload,_=build_payload(AIConfig(),store.load_characters(),store,'main','user_reply',current_input={'kind':'typed_text','text':'已讀不回','saved':False})
+            voice_schema=voice_payload['response_format']['json_schema']['schema']
+            for array in voice_schema['properties']['messages']['anyOf']:
+                for item in array['items']['anyOf']:
+                    properties=item['properties']
+                    if properties['speaker_id'].get('enum')==['shogo']:
+                        description=voice_schema['$defs'][properties['segments']['$ref'].split('/')[-1]]['items']['properties']['text']['description']
+                        assert reference in description and '自分の観察・判断・関心' in description and '会話の目的' in description
+                    else:
+                        assert 'shogo' not in voice_schema['$defs']['other_resident_id']['enum']
+            checks.append('frozen Shogo user-approved dialogue reference migrates once with backup, stays separate from memories and binds independent purpose/rhythm to own output field; reported polite connective forms flagged locally, no API')
             window = MainWindow(DemoBackend(), store.load_characters(), store)
             window.show()
             app.processEvents()

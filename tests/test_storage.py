@@ -244,3 +244,37 @@ def test_shogo_register_update_applies_after_previous_044_address_marker(store):
     assert current.behavior==shogo.behavior
     assert current.source_text==legacy.source_text and current.relationships==legacy.relationships
     assert store.apply_confirmed_shogo_address_update() is None
+
+
+def test_shogo_dialogue_reference_upgrade_preserves_existing_persona_au_and_memory(store):
+    from dataclasses import asdict, replace
+    profiles=store.load_characters()
+    shogo=next(c for c in profiles if c.id=='shogo')
+    old=replace(shogo,language_rules={k:v for k,v in shogo.language_rules.items() if k!='dialogue_style_reference'},
+                personality_core=shogo.personality_core+'自訂核心保留',behavior=(*shogo.behavior,'後續自訂行為'))
+    store.save_character(old)
+    store.apply_confirmed_shogo_address_update()
+    store.append_message(speaker_id='user',speaker_name='月',text='保留原聊天')
+    store.add_memory('已確認記憶',character_id='shogo')
+    store.add_event('保留既有事件')
+    before=(store.messages(),store.memories(),store.events())
+    safety=store.apply_confirmed_shogo_dialogue_reference()
+    assert safety and safety.is_file()
+    updated=next(c for c in store.load_characters() if c.id=='shogo')
+    a,b=json.loads(json.dumps(asdict(old))),json.loads(json.dumps(asdict(updated)))
+    assert {k for k in a if a[k]!=b[k]}=={'language_rules'}
+    assert updated.language_rules['dialogue_style_reference']['native']=='既読無視か。別に、返事をしないことにも理由はあるだろうね。君はどう思う？'
+    assert '不是已發生事件' in updated.language_rules['dialogue_style_reference']['scope']
+    assert before==(store.messages(),store.memories(),store.events())
+    assert [c for c in store.load_characters() if c.id!='shogo']==[c for c in profiles if c.id!='shogo']
+    backup=SQLiteStore(safety)
+    try:assert next(c for c in backup.load_characters() if c.id=='shogo').language_rules==old.language_rules
+    finally:backup.close()
+    store.save_character(replace(updated,language_rules={**updated.language_rules,'dialogue_style_reference':{'native':'後續自訂'}}))
+    assert store.apply_confirmed_shogo_dialogue_reference() is None
+    reopened=SQLiteStore(store.path)
+    try:
+        assert reopened.apply_confirmed_shogo_dialogue_reference() is None
+        assert next(c for c in reopened.load_characters() if c.id=='shogo').language_rules['dialogue_style_reference']['native']=='後續自訂'
+        assert before==(reopened.messages(),reopened.memories(),reopened.events())
+    finally:reopened.close()

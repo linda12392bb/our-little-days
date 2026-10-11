@@ -38,6 +38,10 @@ def response(value=None):
             'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(value or turn(), ensure_ascii=False)}}]}
 
 
+def resolved(schema, field):
+    return schema['$defs'][field['$ref'].split('/')[-1]] if '$ref' in field else field
+
+
 def test_all_request_types_share_budget_and_uncertain_charges_persist(tmp_path):
     path = tmp_path / 'usage.sqlite3'
     ledger = UsageLedger(path)
@@ -254,14 +258,16 @@ def test_request_schema_constrains_selected_character_and_real_reply_ids(store):
     foreign = store.append_message(speaker_id='user', speaker_name='月鹿', text='其他世界線', worldline='glasshouse')
     test = store.append_message(speaker_id='order', speaker_name='序', text='介面測試', source_kind='test')
     payload, _ = build_payload(AIConfig(), characters, store, 'main', 'quiet_chat')
-    variants = payload['response_format']['json_schema']['schema']['properties']['messages']['anyOf'][0]['items']['anyOf']
+    root = payload['response_format']['json_schema']['schema']
+    variants = root['properties']['messages']['anyOf'][0]['items']['anyOf']
     fields = variants[0]['properties']
-    historical = variants[1]['properties']
-    assert set(fields['speaker_id']['enum']) == {c.id for c in characters}
+    historical = next(v['properties'] for v in variants if v['properties']['reply_to_message_id']!={'type':'null'})
+    previous_ids = resolved(root,historical['reply_to_message_id'])['enum']
+    assert set(resolved(root,fields['speaker_id'])['enum']) == {c.id for c in characters if c.id!='shogo'}
     assert fields['reply_to_message_id'] == {'type':'null'}
-    assert historical['reply_to_message_id']['enum'] == [main['id']]
+    assert previous_ids == [main['id']]
     assert historical['recipient_ids']['items']['enum'] == ['user']
-    assert foreign['id'] not in historical['reply_to_message_id']['enum'] and test['id'] not in historical['reply_to_message_id']['enum']
+    assert foreign['id'] not in previous_ids and test['id'] not in previous_ids
     assert [asdict(c) for c in store.load_characters()] == before
 
 
@@ -551,8 +557,9 @@ def test_user_reply_schema_uses_local_references_and_requires_a_reply(store):
         payload, _ = build_payload(AIConfig(), profiles, store, 'main', 'user_reply', current_input=current)
         schema = payload['response_format']['json_schema']['schema']['properties']['messages']
         assert schema['anyOf'][0]['minItems'] == 1
-        fields = schema['anyOf'][0]['items']['properties']
-        assert fields['reply_to_index'] == fields['reply_to_message_id'] == {'type':'null'}
+        for variant in schema['anyOf'][0]['items']['anyOf']:
+            fields = variant['properties']
+            assert fields['reply_to_index'] == fields['reply_to_message_id'] == {'type':'null'}
         context = json.loads(payload['messages'][1]['content'][0]['text'])
         assert context['current_user_input'] == current and len(context['characters']) == 13
     empty = turn()
@@ -567,13 +574,16 @@ def test_historical_reference_schema_couples_ids_to_actual_speakers(store):
     b = store.append_message(speaker_id='order', speaker_name='序', text='ほんま♡')
     foreign = store.append_message(speaker_id='light', speaker_name='光', text='AU', worldline='glasshouse')
     payload, _ = build_payload(AIConfig(), profiles, store, 'main', 'quiet_chat')
-    branches = payload['response_format']['json_schema']['schema']['properties']['messages']['anyOf'][0]['items']['anyOf']
+    root = payload['response_format']['json_schema']['schema']
+    branches = root['properties']['messages']['anyOf'][0]['items']['anyOf']
     pairs = {}
-    for branch in branches[1:]:
+    for branch in branches:
         fields = branch['properties']
+        if fields['reply_to_message_id']=={'type':'null'}:
+            continue
         assert fields['recipient_ids']['minItems'] == fields['recipient_ids']['maxItems'] == 1
         author, = fields['recipient_ids']['items']['enum']
-        pairs.update({message_id:author for message_id in fields['reply_to_message_id']['enum']})
+        pairs.update({message_id:author for message_id in resolved(root,fields['reply_to_message_id'])['enum']})
     assert pairs == {a['id']:'light', b['id']:'order'} and foreign['id'] not in pairs
     value = turn()
     value.update(meaningful=False, event_key='', summary='', important=False)
@@ -745,16 +755,22 @@ def residents_turn(profiles):
 def test_output_envelope_allows_thirteen_with_shorter_many_speaker_branches(store,app,kind):
     profiles=store.load_characters();before=[asdict(c) for c in profiles]
     payload,_=build_payload(AIConfig(),profiles,store,'main',kind,image=image() if kind=='screen_event' else None)
-    arrays=payload['response_format']['json_schema']['schema']['properties']['messages']['anyOf']
+    root=payload['response_format']['json_schema']['schema']
+    arrays=root['properties']['messages']['anyOf']
     assert [b['maxItems'] for b in arrays]==[3,7,13]
     assert [b['minItems'] for b in arrays]==[1 if kind=='user_reply' else 0,4,8]
     caps=[]
     for b in arrays:
         variants=b['items'].get('anyOf',[b['items']])
+        covered=set()
         for item in variants:
             fields=item['properties']
-            assert fields['speaker_id']['enum']==[c.id for c in profiles]
+            covered.update(resolved(root,fields['speaker_id'])['enum'])
             assert fields['reply_to_index']=={'type':'null'}
+            if fields['speaker_id'].get('enum')==['shogo']:
+                native=resolved(root,fields['segments'])['items']['properties']['text']
+                assert '会話の目的' in native['description'] and '既読無視か' in native['description']
+        assert covered=={c.id for c in profiles}
         seg=variants[0]['properties']['segments']
         caps.append((seg['maxItems'],seg['items']['properties']['text']['maxLength'],seg['items']['properties']['translation']['maxLength']))
     assert caps==[(2,64,80),(1,32,40),(1,16,20)]
@@ -799,8 +815,11 @@ def test_large_peer_history_reuses_resident_enum_under_provider_schema_limit(sto
     assert enum_count(schema)<=500  # Conservative bound across supported models.
     assert schema['$defs']['resident_id']['enum']==[c.id for c in profiles]
     for array in schema['properties']['messages']['anyOf']:
-        for historic in array['items']['anyOf'][1:]:
-            assert historic['properties']['speaker_id']=={'$ref':'#/$defs/resident_id'}
+        for historic in array['items']['anyOf']:
+            assert historic['properties']['speaker_id'] in ({'$ref':'#/$defs/other_resident_id'},{'type':'string','enum':['shogo']})
+            ref=historic['properties']['reply_to_message_id']
+            if '$ref' in ref:
+                assert resolved(schema,ref)['enum']
     assert len(store.messages())==101
 
 
@@ -863,6 +882,75 @@ def test_reply_advisories_do_not_flag_plain_voice_quotes_or_absent_visuals(store
     profiles=store.load_characters()
     shogo=next(c for c in profiles if c.id=='shogo')
     assert reply_quality_notes(shogo,text,profiles,image_attached=False)==[]
+
+
+@pytest.mark.parametrize('native', ['この画面はチャット画面のログが見えますね。',
+    '背景はダークテーマです。', '文字の一部がぼやけて読みづらいですが、利用中のサイトは確認できない。',
+    'そうですね、誰かが既読スルーすることはありますが、僕たちは君との時間を大切にしていますよ。',
+    '僕も気になりました。', 'まだ来ていませんから、待とうか。', 'そうでしょうね。', '見えますが文字は読めない。'])
+def test_reported_shogo_polite_conjugations_are_flagged_without_rewriting(store,native):
+    profiles=store.load_characters();shogo=next(c for c in profiles if c.id=='shogo')
+    assert any('敬語' in n for n in reply_quality_notes(shogo,native,profiles,image_attached=True))
+    assert not reply_quality_notes(next(c for c in profiles if c.id=='reo'),native,profiles,image_attached=True)
+
+
+def test_shogo_dialogue_check_considers_purpose_without_replacing_canon(store):
+    profiles=store.load_characters();shogo=next(c for c in profiles if c.id=='shogo')
+    generic='僕たちは君との時間を大切にしているよ。'
+    notes=reply_quality_notes(shogo,generic,profiles)
+    assert any('自身判斷' in n for n in notes) and not any('敬語' in n for n in notes)
+    for native in ['月、僕は君を大切に思っているよ。', 'ますます面白いね。', 'それでしか表せないものもある。',
+                   'REOは「僕たちは君を大切にしていますよ」と言った。',shogo.language_rules['dialogue_style_reference']['native']]:
+        assert not reply_quality_notes(shogo,native,profiles)
+
+
+def test_approved_shogo_dialogue_is_reference_not_script_or_new_memory(store):
+    profiles=store.load_characters();shogo=next(c for c in profiles if c.id=='shogo')
+    native=shogo.language_rules['dialogue_style_reference']['native']
+    assert not reply_quality_notes(shogo,native,profiles)
+    for kind in ('user_reply','screen_event','quiet_chat','reply_test'):
+        payload,_=build_payload(AIConfig(),profiles,store,'main',kind,image=image() if kind=='screen_event' else None,
+                                selected='shogo' if kind=='reply_test' else None)
+        root=payload['response_format']['json_schema']['schema'];messages=root['properties']['messages']
+        for array in messages.get('anyOf',[messages]):
+            branches=array['items'].get('anyOf',[array['items']])
+            dedicated=[b for b in branches if b['properties']['speaker_id'].get('enum')==['shogo']]
+            assert dedicated
+            for branch in dedicated:
+                desc=resolved(root,branch['properties']['segments'])['items']['properties']['text']['description']
+                assert native in desc and '今の入力に自分の言葉で応じ' in desc
+                assert '自分の観察・判断・関心' in desc and '接客係' in desc and '会話の目的' in desc
+                assert '柔らかな常体' in desc and '毎回質問' in desc
+            others=[b for b in branches if b not in dedicated]
+            assert all('shogo' not in resolved(root,b['properties']['speaker_id'])['enum'] for b in others)
+        context=json.loads(payload['messages'][1]['content'][0]['text'])
+        assert len(context['characters'])==13 and not context['recent_chat']
+        assert not context['long_term_memories'] and not context['important_events']
+        assert payload['max_completion_tokens']==2000 and len(payload['messages'])==4
+    assert not store.messages() and not store.memories() and not store.events()
+
+
+def test_shogo_check_survives_other_speaker_batch_and_ui_reopen(app,store):
+    profiles=store.load_characters();native='この画面はチャット画面のログが見えますね。'
+    value={'meaningful':False,'event_key':'','summary':'','important':False,'read_character_ids':[],
+           'messages':[{'speaker_id':'shogo','recipient_ids':['user'],'reply_to_index':None,'reply_to_message_id':None,
+                        'segments':[{'kind':'speech','text':native,'translation':'這畫面看得見聊天紀錄。'}]}]}
+    record=save_turn(store,'main',validate_turn(response(value),profiles,'user_reply'),profiles,'user_reply',image_attached=True)[0]
+    check=store.reply_diagnostic('main','shogo')
+    other=residents_turn(profiles);other['messages']=other['messages'][:1]
+    save_turn(store,'main',other,profiles,'user_reply')
+    assert store.reply_diagnostic('main')['replied_character_ids']==['light']
+    assert store.reply_diagnostic('main','shogo')==check and check['warnings']
+    assert store.message_reply_notes('main',record['id']) and not store.message_reply_notes('glasshouse',record['id'])
+    from our_little_days.storage import SQLiteStore
+    reopened=SQLiteStore(store.path)
+    window=MainWindow(UnsupportedBackend(),reopened.load_characters(),reopened)
+    try:
+        from PySide6.QtWidgets import QLabel
+        assert any('回覆檢查提示' in l.text() for card in window.cards for l in card.findChildren(QLabel))
+        assert reopened.messages()[0]['text'].startswith(native)
+        assert reopened.reply_diagnostic('main','shogo')==check
+    finally:window.close();app.processEvents();reopened.close()
 
 
 def test_screenshot_reply_mixups_are_advisory_not_rewritten_and_worldline_isolated(store):

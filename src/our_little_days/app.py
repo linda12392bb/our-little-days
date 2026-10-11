@@ -40,6 +40,7 @@ def main():
         store.seed(characters, load_apartment_settings())
         store.apply_confirmed_order_speech_update()
         store.apply_confirmed_shogo_address_update()
+        store.apply_confirmed_shogo_dialogue_reference()
         characters = store.load_characters()
     except (OSError, ValueError, TypeError, KeyError, StorageError, sqlite3.DatabaseError) as exc:
         if store:

@@ -169,6 +169,27 @@ class SQLiteStore:
             if count != 1:
                 raise StorageError("角色不存在。")
 
+    def apply_confirmed_shogo_dialogue_reference(self):
+        """Append the user's reference once, without replacing traits or memories."""
+        from .models import load_characters
+        marker = 'confirmed:shogo-dialogue-reference-2026-10-11'
+        if self.connection.execute('SELECT 1 FROM settings WHERE key=?', (marker,)).fetchone():
+            return None
+        current = next(c for c in self.load_characters() if c.id == 'shogo')
+        approved = next(c for c in load_characters() if c.id == 'shogo').language_rules['dialogue_style_reference']
+        rules = dict(current.language_rules or {})
+        safety = None
+        if rules.get('dialogue_style_reference') != approved:
+            safety = self.path.parent / 'backups' / f'before-shogo-dialogue-{taipei_now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.sqlite3'
+            self.backup(safety)
+            rules['dialogue_style_reference'] = approved
+        with self.connection:
+            if safety:
+                self.connection.execute('UPDATE characters SET profile_json=?,updated_at=? WHERE id=?',
+                                        (encode(asdict(replace(current, language_rules=rules))), taipei_now().isoformat(), 'shogo'))
+            self.connection.execute('INSERT INTO settings VALUES (?,?)', (marker, encode({'applied_at':taipei_now().isoformat()})))
+        return safety
+
     def apply_confirmed_shogo_address_update(self, *, force=False):
         """One approved update; preserve original text, custom traits and all AU relations."""
         marker = 'confirmed:shogo-address-register-2026-10-11'
@@ -217,9 +238,15 @@ class SQLiteStore:
         row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('ai-persona-preparation:'+worldline,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def reply_diagnostic(self, worldline):
-        row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('ai-reply-diagnostic:'+worldline,)).fetchone()
+    def reply_diagnostic(self, worldline, character_id=None):
+        key = 'ai-reply-diagnostic:'+worldline + (':'+character_id if character_id else '')
+        row = self.connection.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
         return json.loads(row[0]) if row else {}
+
+    def message_reply_notes(self, worldline, message_id):
+        row = self.connection.execute('SELECT value FROM settings WHERE key=?',
+                                      (f'ai-reply-notes:{worldline}:{message_id}',)).fetchone()
+        return json.loads(row[0]) if row else []
 
     def record_api_result(self, worldline, kind, request_id, response, output_limit, estimated_twd):
         """Keep failure evidence locally without raw response, chat, images or keys."""
