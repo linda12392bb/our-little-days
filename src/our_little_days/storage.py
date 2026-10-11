@@ -236,6 +236,22 @@ class SQLiteStore:
         row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('conversation:'+worldline,)).fetchone()
         return json.loads(row[0]) if row else {}
 
+    def roster_status(self, worldline="main"):
+        """Latest saved user turn only; read decisions require explicit AI evidence."""
+        user = self.connection.execute("SELECT id FROM messages WHERE worldline_id=? AND speaker_id='user' AND source_kind IN ('user','voice') ORDER BY id DESC LIMIT 1", (worldline,)).fetchone()
+        if not user:
+            return {'user_message_id':None, 'replied':[], 'read':[]}
+        connected, replied = {user['id']}, []
+        messages = self.connection.execute("SELECT id,speaker_id,reply_to FROM messages WHERE worldline_id=? AND id>? AND source_kind='ai' ORDER BY id", (worldline,user['id']))
+        for m in messages:
+            if m['reply_to'] in connected:
+                connected.add(m['id'])
+                replied.append(m['speaker_id'])
+        row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('roster:'+worldline,)).fetchone()
+        decision = json.loads(row[0]) if row else {}
+        read = decision.get('read_character_ids', []) if decision.get('user_message_id')==user['id'] else []
+        return {'user_message_id':user['id'], 'replied':list(dict.fromkeys(replied)), 'read':read}
+
     def conversation_context(self, worldline="main"):
         state = self.conversation_state(worldline)
         # Original quotes and IDs survive long chat histories; no invented summary.
@@ -249,6 +265,7 @@ class SQLiteStore:
         with self.connection:
             self.connection.execute("DELETE FROM messages WHERE worldline_id=?", (worldline,))
             self.connection.execute('DELETE FROM settings WHERE key=?', ('conversation:'+worldline,))
+            self.connection.execute('DELETE FROM settings WHERE key=?', ('roster:'+worldline,))
 
     def add_event(self, summary, worldline="main", evidence=None, importance="important"):
         if not summary.strip():

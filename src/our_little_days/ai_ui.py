@@ -200,7 +200,8 @@ class AIController(QObject):
                 self.last_note = '住戶忙碌，語音文字暫存已達上限；請先等候，不增加請求'
                 self.refresh()
                 return False
-            self.voice_inputs.append((transient_text, user_message_id, include_image, self.window.worldline))
+            roster = self.window.begin_transient_round() if user_message_id is None else None
+            self.voice_inputs.append((transient_text, user_message_id, include_image, self.window.worldline, roster))
         if self.worker:
             self.pending_user = True
         else:
@@ -227,9 +228,10 @@ class AIController(QObject):
             self.refresh()
             return False
         current_input = None
+        request_roster = None
         user_message_id = 'latest'
         if kind == 'user_reply' and self.voice_inputs:
-            text, user_message_id, with_image, worldline = self.voice_inputs.popleft()
+            text, user_message_id, with_image, worldline, request_roster = self.voice_inputs.popleft()
             if worldline != self.window.worldline:
                 return False
             current_input = {'kind':'voice_transcript', 'text':text, 'saved':user_message_id is not None}
@@ -267,6 +269,7 @@ class AIController(QObject):
             self.test_failure(kind, self.last_note)
             return False
         self.user_message_id = user_message_id
+        self.request_roster = request_roster
         self.request_id = request_id
         self.kind, self.selected = kind, selected
         self.request_characters, self.request_worldline = characters, worldline
@@ -300,6 +303,9 @@ class AIController(QObject):
             records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id, quiet_cooldown=self.request_config.quiet_interval_minutes)
             for record in records:
                 self.window.render_message(record)
+            if self.request_roster is not None and self.window.transient_roster is self.request_roster:
+                self.request_roster.update(replied=list(dict.fromkeys(r['speaker_id'] for r in records)), read=turn.get('read_character_ids', []))
+            self.window.refresh_roster()
             if self.kind in {'screen_test', 'reply_test', 'quiet_test'}:
                 if self.kind != 'quiet_test':
                     self.ledger.mark_test(self.request_config, self.kind, self.request_id)

@@ -135,7 +135,7 @@ def test_multilingual_bubbles_and_real_roster_states(window, monkeypatch):
         window.add_test_message()
         card = window.cards[-1]
         assert card.character is character
-        assert window.roster_labels[character.id].text() == "○ 已回覆"
+        assert window.roster_labels[character.id].text() == "· 未出場"  # Display samples are not real replies.
         assert hasattr(card, "translation_label") == (character.language != "zh-TW")
     monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
     window.clear_chat()

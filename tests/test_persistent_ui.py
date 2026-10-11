@@ -25,7 +25,7 @@ def test_window_close_reopen_restores_history_without_duplicate_welcome(app, sto
     try:
         assert len(second.cards) == len(original) == 4
         assert reopened.messages() == original
-        assert second.roster_labels["shogo"].text() == "○ 已回覆"
+        assert second.roster_labels["shogo"].text() == "· 未出場"  # Test bubbles do not count.
         assert second.frame_image is None
         assert not second.timer.isActive()
     finally:
@@ -145,5 +145,62 @@ def test_inspect_current_profile_and_explicit_repair_without_paid_request(app,st
         assert updated.relationships==original.relationships and store.messages()==messages
         assert [c for c in store.load_characters() if c.id!='shogo']==before
         assert list((store.path.parent/'backups').glob('before-shogo-address-*.sqlite3'))
+    finally:
+        window.close();app.processEvents()
+
+
+def test_roster_tracks_latest_input_with_explicit_read_and_reopen(app,store):
+    import json
+    from our_little_days.ai_engine import save_turn
+    window=MainWindow(DemoBackend(),store.load_characters(),store)
+    try:
+        # Reproduce the screenshot: all thirteen historical display samples.
+        for i in range(13):
+            window.character_combo.setCurrentIndex(i)
+            window.add_test_message()
+        old=store.append_message(speaker_id='user',speaker_name='月',text='舊訊息')
+        for c in store.load_characters():
+            store.append_message(speaker_id=c.id,speaker_name=c.name,text='舊回覆',source_kind='ai',reply_to=old['id'])
+        current=store.append_message(speaker_id='user',speaker_name='月',text='本輪只有聖護回覆')
+        window.render_message(current)
+        assert all(v.text()=='· 未出場' for v in window.roster_labels.values())
+        turn={'read_character_ids':['reo'], 'messages':[{'speaker_id':'shogo','recipient_ids':['user'], 'reply_to_index':None,'reply_to_message_id':None,'segments':[{'text':'月、僕はここにいるよ。','translation':'月，我就在這裡。'}]}]}
+        record=save_turn(store,'main',turn,store.load_characters(),'user_reply',current['id'])[0]
+        window.render_message(record)
+        assert window.roster_labels['shogo'].text()=='○ 已回覆'
+        assert window.roster_labels['reo'].text()=='✓ 已讀未回'
+        assert all(v.text()=='· 未出場' for k,v in window.roster_labels.items() if k not in {'shogo','reo'})
+        assert store.roster_status('glasshouse')['replied']==[] and store.roster_status('glasshouse')['read']==[]
+        reopened=SQLiteStore(store.path)
+        try:assert reopened.roster_status()==store.roster_status()
+        finally:reopened.close()
+        newest=store.append_message(speaker_id='user',speaker_name='月',text='新的一輪')
+        # A slow reply to the previous input must not mark the new round replied/read.
+        save_turn(store,'main',turn,store.load_characters(),'user_reply',current['id'])
+        window.render_message(newest)
+        assert all(v.text()=='· 未出場' for v in window.roster_labels.values())
+        assert store.messages()[0]['source_kind']=='system'  # No history reset.
+    finally:
+        window.close();app.processEvents()
+
+
+def test_translation_display_hides_only_exact_adjacent_repeats_without_editing_sqlite(app,store):
+    from PySide6.QtWidgets import QLabel
+    from our_little_days.ui import display_message_text, MessageCard
+    text='月、僕はここにいるよ。\n（ 月，我就在這裡。 ）\n（月，我就在這裡。）'
+    record=store.append_message(speaker_id='shogo',speaker_name='聖護',text=text,source_kind='ai')
+    window=MainWindow(DemoBackend(),store.load_characters(),store)
+    try:
+        shown=next(v.text() for v in window.cards[-1].findChildren(QLabel) if v.objectName()=='messageText')
+        assert shown.count('我就在這裡')==1
+        assert store.messages()[-1]['text']==text
+        assert display_message_text('うん。\n（嗯。）\nうん。\n（嗯。）')[0].count('（嗯。）')==2
+        assert display_message_text('日文\n（意思不同。）\n（另一種翻譯。）')[0].count('（')==2
+        assert display_message_text('（そうだね。）\n（そうだね。）')[0].count('そうだね')==2
+        assert display_message_text('うん。\n（嗯。）','嗯。')[1]==''
+        user_card=MessageCard('月',text,'','10:00',user=True)
+        try:
+            assert next(v.text() for v in user_card.findChildren(QLabel) if v.objectName()=='messageText')==text
+        finally:user_card.deleteLater()
     finally:
         window.close();app.processEvents()

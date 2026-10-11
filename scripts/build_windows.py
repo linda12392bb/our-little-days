@@ -107,7 +107,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.4.5",
+        "version": "0.4.6",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -119,13 +119,13 @@ def main():
         "whisper_runtime": speech_manifest,
         "windows_manual_acceptance": "not_run",
         "signing": "unsigned",
-        "scope": "Shogo confirmed soft plain Japanese/no keigo/僕 applied with backup. Viewer displays fresh SQLite settings and per-worldline prepared persona diagnostics separately from retained source; explicit free repair available. Final generation review uses current Shogo identity and is included in input budget. Full 13 personas, memories, AU and shared budget preserved; native live model acceptance pending.",
+        "scope": "Latest user-turn roster with explicit read decisions, original translation text retained with conservative display deduplication, GPT-4.1 application context guard 256k; conservative all-request budget unchanged. Full personas, SQLite, Shogo 0.4.5 updates and AU preserved. Native live model acceptance pending.",
     }
     (folder / "BUILD_INFO.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.5-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.6-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():

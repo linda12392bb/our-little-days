@@ -708,3 +708,63 @@ def test_successful_request_diagnostic_matches_prepared_profile_without_keys_or_
         finally:reopened.close()
     finally:
         window.close();app.processEvents()
+
+
+@pytest.mark.parametrize('bad_readers', [['不存在的住戶'], ['reo','reo'], 'reo', [None]])
+def test_invalid_explicit_read_decisions_are_rejected(bad_readers,store):
+    value=json.loads(response()['choices'][0]['message']['content'])
+    value['read_character_ids']=bad_readers
+    value['messages']=value['messages'][:1]
+    for m in value['messages']:
+        m['reply_to_index']=None
+        m['reply_to_message_id']=None
+    raw=response();raw['choices'][0]['message']['content']=json.dumps(value)
+    with pytest.raises(AIError,match='已讀住戶'):
+        validate_turn(raw,store.load_characters(),'user_reply')
+    assert store.roster_status()['read']==[]
+
+
+def test_image_context_over_old_guard_preserves_all_personas_memory_and_budget(store,app):
+    memory='完整記憶保留'+('x'*80_000)
+    store.add_memory(memory,character_id='shogo')
+    before=store.load_characters()
+    config=AIConfig()
+    payload,upper=build_payload(config,before,store,'main','screen_event',image())
+    assert upper+config.max_output_tokens>120_000
+    assert upper+config.max_output_tokens<=256_000
+    context=json.loads(payload['messages'][1]['content'][0]['text'])
+    assert context['characters']==json.loads(json.dumps([asdict(c) for c in before]))
+    assert context['long_term_memories'][0]['content']==memory
+    assert any(p['type']=='image_url' for p in payload['messages'][1]['content'])
+    ledger=UsageLedger(store.path.parent/'context-budget-test.sqlite3')
+    try:
+        with pytest.raises(AIError,match='預算'):
+            ledger.reserve(replace(config,monthly_budget_twd=.01),'screen_event',upper)
+        assert ledger.totals()['month']['requests']==0
+    finally:ledger.close()
+    with pytest.raises(AIError,match='120,000'):
+        build_payload(replace(config,model='gpt-4o-mini'),before,store,'main','screen_event',image())
+    assert store.memories()[0]['content']==memory and store.load_characters()==before
+
+
+def test_true_context_overflow_stops_without_deleting_memory(store):
+    store.add_memory('x'*300_000,character_id='shogo')
+    before=store.load_characters()
+    with pytest.raises(AIError,match='本次未送出、不刪除人格或記憶'):
+        build_payload(AIConfig(),before,store,'main','user_reply')
+    assert len(store.memories()[0]['content'])==300_000 and store.load_characters()==before
+
+
+def test_unsaved_voice_roster_is_ephemeral_and_does_not_mark_old_typed_round(app,store,monkeypatch):
+    window=MainWindow(UnsupportedBackend(),store.load_characters(),store)
+    try:
+        calls=setup_fake(window,monkeypatch)
+        window.ai.enabled = True  # Explicitly enabled test controller; no real provider.
+        old=store.append_message(speaker_id='user',speaker_name='月',text='之前的打字')
+        assert window.ai.user_sent(transient_text='不是吧？',user_message_id=None)
+        wait(lambda:window.ai.worker is None)
+        assert window.transient_roster is not None
+        assert window.roster_labels['order'].text()=='○ 已回覆'
+        assert store.roster_status()['replied']==[] and store.roster_status()['user_message_id']==old['id']
+        assert not any('不是吧' in row['text'] for row in store.messages())
+    finally:window.close();app.processEvents()

@@ -10,6 +10,32 @@ from PySide6.QtWidgets import (
 from .models import MonitorState, is_night, taipei_now
 from .ai_engine import ChangeGate
 import json
+import re
+
+
+def display_message_text(text, translation=""):
+    """Hide only adjacent identical Chinese translation lines; retain saved originals."""
+    lines = []
+    def translation_key(line):
+        line = line.strip()
+        if len(line)<3 or (line[0],line[-1]) not in {('（','）'),('(',')')}:
+            return None
+        body = line[1:-1]
+        if not re.search('[\u4e00-\u9fff]', body) or re.search('[ぁ-ゖァ-ヺ]', body):
+            return None
+        return re.sub(r'\s+', '', body)
+    for line in text.splitlines():
+        key = translation_key(line)
+        if key and lines and key==translation_key(lines[-1]):
+            continue
+        lines.append(line)
+    if translation and lines:
+        bare = translation.strip()
+        if len(bare)>1 and (bare[0],bare[-1]) in {('（','）'),('(',')')}:
+            bare = bare[1:-1]
+        if translation_key(lines[-1])==re.sub(r'\s+', '', bare):
+            translation = ''
+    return '\n'.join(lines), translation
 
 
 def label(text="", object_name="", wrap=False):
@@ -75,7 +101,8 @@ class MessageCard(QFrame):
         heading.addStretch()
         heading.addWidget(label(time, "messageTime"))
         layout.addLayout(heading)
-        content = label(text, "messageText", True)
+        shown_text, translation = display_message_text(text, translation) if character and not user else (text, translation)
+        content = label(shown_text, "messageText", True)
         content.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(content)
         if translation:
@@ -184,7 +211,7 @@ class MainWindow(QMainWindow):
         columns.setHandleWidth(12)
         outer.addWidget(columns, 1)
 
-        # Full roster; statuses reflect only messages actually inserted.
+        # Full roster; current round status excludes historical/test appearances.
         roster = QFrame()
         roster.setObjectName("panel")
         roster_layout = QVBoxLayout(roster)
@@ -202,6 +229,9 @@ class MainWindow(QMainWindow):
             roster_layout.addLayout(row)
         roster_layout.addStretch()
         roster_layout.addWidget(label("○ 已回覆\n✓ 已讀未回\n· 未出場", "hint", True))
+        self.roster_round = label("本輪：尚無使用者訊息", "hint", True)
+        self.roster_round.setToolTip('以最新一次已保存的使用者訊息為一輪。已回覆包含本輪接話；已讀需模型明確標記，不由人格送入 API 推測。測試氣泡不計入。')
+        roster_layout.addWidget(self.roster_round)
         roster_scroll = QScrollArea()
         roster_scroll.setWidgetResizable(True)
         roster_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -424,7 +454,7 @@ class MainWindow(QMainWindow):
         for widget in (self.voice_save, self.voice_auto):
             widget.toggled.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
         controls_layout.addStretch()
-        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.5", "sectionTitle"))
+        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.6", "sectionTitle"))
         controls_layout.addWidget(label("聊天與角色資料永久保存在本機。\n不錄影、不存截圖。只有手動啟用 AI 後，\n選定視窗圖片與所需文字才會傳送 API。\n暫停觀察不會刪除記憶。", "hint", True))
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -435,7 +465,7 @@ class MainWindow(QMainWindow):
         controls_scroll.setWidget(controls)
         columns.addWidget(controls_scroll)
         columns.setSizes([170, 620, 285])
-        outer.addWidget(label("自主陪伴試用 0.4.5  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
+        outer.addWidget(label("自主陪伴試用 0.4.6  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
         self.update_controls()
 
     def apply_theme(self, *_):
@@ -658,8 +688,10 @@ class MainWindow(QMainWindow):
             row.addStretch(1)
         self.message_layout.insertLayout(self.message_layout.count() - 1, row)
         self.cards.append(card)
-        if character:
-            self.roster_labels[character.id].setText("○ 已回覆")
+        if user and record['source_kind'] in {'user', 'voice'}:
+            self.transient_roster = None
+        if not getattr(self, 'loading_history', False):
+            self.refresh_roster()
         if was_at_bottom:
             QTimer.singleShot(0, self.scroll_to_bottom)
 
@@ -785,10 +817,27 @@ class MainWindow(QMainWindow):
 
     def load_history(self):
         self.clear_chat_widgets()
-        for record in self.store.messages(self.worldline):
-            self.render_message(record)
+        self.loading_history = True
+        try:
+            for record in self.store.messages(self.worldline):
+                self.render_message(record)
+        finally:
+            self.loading_history = False
+        self.refresh_roster()
+
+    def refresh_roster(self):
+        status = getattr(self, 'transient_roster', None) or self.store.roster_status(self.worldline)
+        for ident, label_widget in self.roster_labels.items():
+            label_widget.setText('○ 已回覆' if ident in status['replied'] else '✓ 已讀未回' if ident in status['read'] else '· 未出場')
+        self.roster_round.setText('本輪：語音（文字未保存）' if getattr(self, 'transient_roster', None) else f'本輪：使用者訊息 #{status["user_message_id"]}' if status['user_message_id'] else '本輪：尚無使用者訊息')
+
+    def begin_transient_round(self):
+        self.transient_roster = {'user_message_id':None, 'replied':[], 'read':[]}
+        self.refresh_roster()
+        return self.transient_roster
 
     def clear_chat_widgets(self):
+        self.transient_roster = None
         while self.message_layout.count() > 1:
             row = self.message_layout.takeAt(0).layout()
             while row.count():
@@ -799,6 +848,7 @@ class MainWindow(QMainWindow):
         self.cards.clear()
         for state in self.roster_labels.values():
             state.setText("· 未出場")
+        self.roster_round.setText('本輪：尚無使用者訊息')
 
     def manage_memory(self):
         from .memory_ui import MemoryDialog

@@ -29,7 +29,8 @@ quiet_chat／quiet_test 是使用者已允許的安靜自主群聊，不提供�
 ongoing_conversation 及 recent_chat 保留已發生的對話，接續未完的玩笑、辯論、吐槽，不把每一批寫成初次見面。光先嘴序，序隔幾分鐘回嘴，REO 再加入都可以；這只是互動方式範例，不是已發生的記憶。不同角色可自然加入，無需十三人全出場。回覆以前批次的具體訊息時使用 reply_to_message_id（只能引用輸入提供、同世界線的真實訊息 ID，且 recipient_ids 包含該訊息的說話者）；同批接話只標示 recipient_ids，兩個 reply_to 欄位均填 null。原文引用不得扭曲對方意思，未確認的背景不可補寫。連續安靜聊天超過三批時可自然收尾或換新話題，避免無限圍繞同一句話，仍保留角色彼此的關係與上下文。
 screen_event 僅於確實出現值得談論的新事件才 meaningful=true；僅時鐘、游標、輕微動畫、同一事件換角度或已談過的事件，不再評論。
 event_key 用簡短穩定的事件識別文字，同一件事即使畫面小改仍用同一 key。summary 描述事件事實。important 只標示具體有意義且清楚可辨識的事件；畫面推測不是使用者已確認的長期記憶，不自行變更人格或關係。
-角色發言及敘事依段落放進 segments，每段 kind 為 speech 或 narration，text 母語、translation 繁體中文；不把翻譯混進 text。
+角色發言及敘事依段落放進 segments，每段 kind 為 speech 或 narration，text 只放母語原文、translation 只放一次繁體中文，不加外層括號、不把翻譯混進 text、不將同一句翻譯再放成另一段；歷史重複翻譯是格式錯誤，不要模仿。
+read_character_ids 只在 user_reply 標記本輪確實安排閱讀目前使用者訊息、但選擇不發言的住戶 ID；不得因完整十三份人格已提供就全選。其餘任務填空陣列。這是對話中明確的已讀決定，不推測角色在請求之外持續思考。
 只回傳符合指定 JSON schema 的資料。'''
 
 
@@ -39,7 +40,7 @@ def _obj(properties):
 
 SEGMENT = _obj({'kind': {'type': 'string', 'enum': ['speech', 'narration']}, 'text': {'type': 'string'}, 'translation': {'type': 'string'}})
 MESSAGE = _obj({'speaker_id': {'type': 'string'}, 'recipient_ids': {'type': 'array', 'items': {'type': 'string'}}, 'reply_to_index': {'type': ['integer', 'null']}, 'reply_to_message_id': {'type': ['integer', 'null']}, 'segments': {'type': 'array', 'items': SEGMENT}})
-SCHEMA = _obj({'meaningful': {'type': 'boolean'}, 'event_key': {'type': 'string'}, 'summary': {'type': 'string'}, 'important': {'type': 'boolean'}, 'messages': {'type': 'array', 'items': MESSAGE}})
+SCHEMA = _obj({'meaningful': {'type': 'boolean'}, 'event_key': {'type': 'string'}, 'summary': {'type': 'string'}, 'important': {'type': 'boolean'}, 'read_character_ids': {'type':'array', 'items':{'type':'string'}}, 'messages': {'type': 'array', 'items': MESSAGE}})
 
 
 def response_schema(characters, kind, selected, exposed_speakers):
@@ -48,6 +49,8 @@ def response_schema(characters, kind, selected, exposed_speakers):
     if kind == 'reply_test' and selected not in ids:
         raise AIError('請先在「訊息氣泡測試」選擇一位住戶；尚未呼叫 API。')
     schema = deepcopy(SCHEMA)
+    schema['properties']['read_character_ids']['items']['enum'] = ids
+    schema['properties']['read_character_ids']['maxItems'] = 13 if kind == 'user_reply' else 0
     messages = schema['properties']['messages']
     messages['maxItems'] = 4
     fields = messages['items']['properties']
@@ -146,7 +149,7 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
         instructions += '\n引用先前訊息時，reply_to_message_id 與 recipient_ids 必須使用 schema 同一分支：對象只填該訊息真正說話者的 ID。新開話題或同批接話則 reply_to_message_id=null，切勿把歷史 ID 搭配另一位角色。'
     exposed_speakers = {row['id']: row['speaker_id'] for row in [*recent, *ongoing['anchor_messages']]}
     schema = response_schema(characters, kind, selected, exposed_speakers)
-    review = '生成前逐則核對 speaker_id 自己的稱呼、語氣與完整人格；不要讓前一位角色或歷史錯誤代替目前設定。核對過程不輸出，只回傳指定 JSON。'
+    review = '生成前逐則核對 speaker_id 自己的稱呼、語氣與完整人格；不要讓前一位角色或歷史錯誤代替目前設定。每段 text 只含母語，translation 只翻譯一次；不沿用歷史的重複翻譯。已讀只標記本輪明確安排閱讀的住戶，不因人格齊全而全選。核對過程不輸出，只回傳指定 JSON。'
     shogo = next(c for c in characters if c.id == 'shogo')
     reo = next(c for c in characters if c.id == 'reo')
     review += '\n聖護目前保存的稱呼與行為：' + json.dumps({'user_address': shogo.user_address, 'tone': shogo.tone, 'self_reference': shogo.self_reference, 'language_rules': shogo.language_rules, 'behavior': list(shogo.behavior)}, ensure_ascii=False)
@@ -162,8 +165,12 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
                           if isinstance(message['content'], list) else message for message in payload['messages']]
     text_bytes = len(json.dumps({**payload, 'messages': text_only_messages}, ensure_ascii=False).encode())
     upper = text_bytes + 2048 + (32768 if image is not None else 0)
-    if upper + config.max_output_tokens > 120_000:
-        raise AIError('完整人格、記憶與歷史超過此版本安全上下文容量；請先整理記憶，不會刪減人格或發送付費請求。')
+    # Keep the byte-based budget reserve conservative, but do not impose the
+    # older small-context guard on GPT-4.1 models. This application cap remains
+    # below their published context window; GPT-4o-mini keeps its smaller guard.
+    capacity = 256_000 if config.model in {'gpt-4.1-mini', 'gpt-4.1'} else 120_000
+    if upper + config.max_output_tokens > capacity:
+        raise AIError(f'本機保守上下文估算 {upper+config.max_output_tokens:,} 超過此模型的程式安全上限 {capacity:,}；本次未送出、不刪除人格或記憶。請保留提示供容量診斷。')
     return payload, upper
 
 
@@ -180,7 +187,8 @@ def validate_turn(response, characters, kind, selected=None, store=None, worldli
         if choice.get('finish_reason') != 'stop':
             invalid('模型未正常完成回覆')
         value = json.loads(choice['message']['content'])
-        if set(value) != set(SCHEMA['properties']) or type(value['meaningful']) is not bool or type(value['important']) is not bool:
+        # Older retained responses may lack read decisions; never infer them.
+        if set(value) not in (set(SCHEMA['properties']), set(SCHEMA['properties'])-{'read_character_ids'}) or type(value['meaningful']) is not bool or type(value['important']) is not bool:
             invalid('最外層欄位或資料型別不符合格式')
         if not isinstance(value['event_key'], str) or not isinstance(value['summary'], str) or len(value['event_key']) > 200 or len(value['summary']) > 3000:
             invalid('事件識別或摘要欄位不符合格式')
@@ -190,6 +198,9 @@ def validate_turn(response, characters, kind, selected=None, store=None, worldli
         if not isinstance(messages, list) or len(messages) > 4 or (kind == 'screen_test' and messages) or (kind == 'reply_test' and len(messages) != 1) or (kind == 'user_reply' and not messages):
             invalid('角色訊息數量不符合此測試要求')
         ids = {c.id: c for c in characters}
+        readers = value.get('read_character_ids', [])
+        if not isinstance(readers, list) or any(not isinstance(r, str) or r not in ids for r in readers) or len(readers)>13 or len(readers)!=len(set(readers)) or (kind != 'user_reply' and readers):
+            invalid('已讀住戶 ID 或任務不符合格式')
         for index, m in enumerate(messages):
             if not isinstance(m, dict) or m.get('speaker_id') not in ids:
                 invalid(f'第 {index+1} 則訊息使用無效角色 ID')
@@ -285,6 +296,13 @@ def save_turn(store, worldline, turn, characters, kind, user_message_id="latest"
             cursor = store.connection.execute('INSERT INTO messages(worldline_id,speaker_id,speaker_name,text,translation,recipient_ids_json,reply_to,source_kind,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
               (worldline, c.id, f'{c.icon} {c.name}', text, '', json.dumps(m['recipient_ids']), reply, 'ai', now))
             records.append(dict(store.connection.execute('SELECT * FROM messages WHERE id=?', (cursor.lastrowid,)).fetchone()))
+        if kind == 'user_reply' and anchor:
+            row = store.connection.execute('SELECT value FROM settings WHERE key=?', ('roster:'+worldline,)).fetchone()
+            previous_status = json.loads(row[0]) if row else {}
+            read_ids = previous_status.get('read_character_ids', []) if previous_status.get('user_message_id')==anchor[0] else []
+            read_ids = list(dict.fromkeys([*read_ids, *turn.get('read_character_ids', [])]))
+            store.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                     ('roster:'+worldline, json.dumps({'user_message_id':anchor[0], 'read_character_ids':read_ids}, ensure_ascii=False)))
         if records:
             ids_before = state.get('anchor_ids', [])
             ids_after = ids_before + [r['id'] for r in records]

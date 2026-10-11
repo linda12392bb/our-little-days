@@ -61,7 +61,7 @@ def _check_manual_buttons(window):
             exposed = {row['id']:row for row in [*context['recent_chat'], *context['ongoing_conversation']['anchor_messages']]}
             for message_id in props['reply_to_message_id']['enum']:
                 assert exposed[message_id]['speaker_id'] == authors[0]
-        value = {'meaningful': True, 'event_key': '', 'summary': '', 'important': False,
+        value = {'meaningful': True, 'event_key': '', 'summary': '', 'important': False, 'read_character_ids':['shogo'] if kind=='user_reply' else [],
                  'messages':[{'speaker_id':'序' if len(calls) == 1 else 'order',
                               'recipient_ids':['user'], 'reply_to_index':None, 'reply_to_message_id':None,
                               'segments':[{'kind':'speech', 'text':'表示テストやで♡', 'translation':'這是顯示測試喔♡'}]}]}
@@ -125,6 +125,13 @@ def _check_manual_buttons(window):
         assert c.worker is None and len(calls) == 4
         records = window.store.messages()[-2:]
         assert records[0]['speaker_id'] == 'user' and records[1]['reply_to'] == records[0]['id']
+        assert window.roster_labels['order'].text()=='○ 已回覆'
+        assert window.roster_labels['shogo'].text()=='✓ 已讀未回'
+        assert all(v.text()=='· 未出場' for ident,v in window.roster_labels.items() if ident not in {'order','shogo'})
+        assert window.store.roster_status()['read']==['shogo']
+        from .ui import display_message_text
+        assert display_message_text('うん。\n（嗯。）\n（嗯。）')[0]=='うん。\n（嗯。）'
+        assert display_message_text('うん。\n（嗯。）\nうん。\n（嗯。）')[0].count('（嗯。）')==2
         assert c.enabled and c.quiet_enabled and len(warnings) == 1
         from PySide6.QtWidgets import QDialog, QTabWidget
         window.character_combo.setCurrentIndex(11)
@@ -226,6 +233,29 @@ def check_package(speech_test_dir=None):
             assert len(context['characters']) == 13
             assert {c['id']: c['source_text'] for c in context['characters']} == {c.id: c.source_text for c in characters}
             checks.append('AI offline by default; budget UI and complete 13-persona payload verified without API calls')
+            capacity_store = SQLiteStore(folder/'context-capacity.sqlite3')
+            try:
+                from PySide6.QtGui import QImage, QColor
+                capacity_store.seed(characters, load_apartment_settings())
+                capacity_store.add_memory('x'*80_000, character_id='shogo')
+                synthetic = QImage(640,480,QImage.Format.Format_RGB32)
+                synthetic.fill(QColor('white'))
+                visual_payload, visual_upper = build_payload(AIConfig(), characters, capacity_store, 'main', 'screen_event', synthetic)
+                visual_context = json.loads(visual_payload['messages'][1]['content'][0]['text'])
+                assert 120_000 < visual_upper+2000 <= 256_000
+                assert len(visual_context['characters'])==13 and visual_context['long_term_memories'][0]['content']=='x'*80_000
+                assert any(p['type']=='image_url' for p in visual_payload['messages'][1]['content'])
+                from .ai_cost import AIError
+                try:
+                    window.ai.ledger.reserve(replace(AIConfig(),monthly_budget_twd=.01),'screen_event',visual_upper)
+                except AIError:
+                    pass
+                else:
+                    raise AssertionError('Extended context must still enforce shared budget')
+                assert window.ai.ledger.totals()['month']['requests']==0
+            finally:
+                capacity_store.close()
+            checks.append('frozen full-persona image payload over old 120k guard succeeds under GPT-4.1 256k application cap; original memory intact and shared budget still blocks insufficient allowance, no API')
             assert not window.ai.quiet_enabled and window.ai.quiet_timer.interval() == 180000
             assert window.ai.config.max_output_tokens == 2000
             assert window.ai.config.quiet_daily_budget_twd == 10
@@ -247,6 +277,7 @@ def check_package(speech_test_dir=None):
             checks.append('frozen quiet_test button creates light-to-order-to-reo peer replies in one mock request; null model indexes resolved locally to prior explicit recipients and persisted; scheduler remains OFF')
             checks.append('frozen send button replies immediately to pinned typed input while quiet mode remains ON; history-ID schema couples each ID with its true speaker, no network')
             checks.append('frozen persona viewer shows actual SQLite 月 address, soft plain Japanese/no keigo/僕 and prepared request diagnostic separately from retained original source; inspection makes no API call')
+            checks.append('frozen roster uses latest user round: actual responder only, explicit Shogo read decision, others absent; exact adjacent translation repeats hidden without extra requests')
             continuity = store.conversation_state('main')
             messages = store.messages()
             checks.append('quiet chat defaults OFF; 3-minute local check, 2000 shared output cap, NT$10 daily cap and persistent cross-batch peer replies verified with synthetic data, no API')
