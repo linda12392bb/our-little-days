@@ -424,7 +424,7 @@ class MainWindow(QMainWindow):
         for widget in (self.voice_save, self.voice_auto):
             widget.toggled.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
         controls_layout.addStretch()
-        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.4", "sectionTitle"))
+        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.5", "sectionTitle"))
         controls_layout.addWidget(label("聊天與角色資料永久保存在本機。\n不錄影、不存截圖。只有手動啟用 AI 後，\n選定視窗圖片與所需文字才會傳送 API。\n暫停觀察不會刪除記憶。", "hint", True))
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -435,7 +435,7 @@ class MainWindow(QMainWindow):
         controls_scroll.setWidget(controls)
         columns.addWidget(controls_scroll)
         columns.setSizes([170, 620, 285])
-        outer.addWidget(label("自主陪伴試用 0.4.4  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
+        outer.addWidget(label("自主陪伴試用 0.4.5  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
         self.update_controls()
 
     def apply_theme(self, *_):
@@ -713,7 +713,8 @@ class MainWindow(QMainWindow):
         self.add_message(f"{character.icon} {character.name} · 測試", text, translation, character)
 
     def inspect_character(self):
-        character = self.character_combo.currentData()
+        ident = self.character_combo.currentData().id
+        character = next(c for c in self.store.load_characters() if c.id == ident)
         dialog = QDialog(self)
         dialog.setWindowTitle(f"{character.icon} {character.name} · 已匯入設定")
         dialog.resize(680, 600)
@@ -721,17 +722,49 @@ class MainWindow(QMainWindow):
         layout.addWidget(label(f"{character.speech_label or character.name}  語言：{character.language}", "sectionTitle"))
         tabs = QTabWidget()
         layout.addWidget(tabs)
+        def current_text(c):
+            return '\n'.join([f'平常稱呼：{c.user_address or "尚未指定"}', f'語言：{c.language}', f'自稱：{c.self_reference or "尚未指定"}', f'語氣：{c.tone or "尚未提供"}', f'發言語體：{(c.language_rules or {}).get("register", "尚未指定")}',
+                              f'人格核心：{c.personality_core or "待補"}', '', '目前行為設定：', *[f'• {item}' for item in c.behavior],
+                              '', '此頁直接讀取本機已保存設定。查看不呼叫 API。原始後台頁保留舊來源；後續已確認更新以此頁為準。'])
+        preparation = self.store.persona_preparation(self.worldline)
+        diagnostic = '這條世界線尚無新版的 AI 設定準備紀錄；舊版請求無法回溯。查看此頁不會呼叫 API。'
+        if preparation:
+            used = preparation['characters'].get(ident, {})
+            diagnostic = f'本機準備時間：{preparation["prepared_at"]}\n世界線：{preparation["worldline"]}\n模型：{preparation["model"]}\n準備使用的稱呼：{used.get("user_address") or "尚未指定"}\n準備使用的自稱：{used.get("self_reference") or "尚未指定"}\n準備使用的語氣：{used.get("tone") or "尚未提供"}\n準備使用的語體：{(used.get("language_rules") or {}).get("register", "尚未指定")}\n\n準備使用的行為：\n' + '\n'.join('• '+b for b in used.get('behavior', [])) + '\n\n這是本機準備紀錄，不代表 API 已收到、已付費或模型已遵守；實際執行結果請看 AI 狀態與用量。'
         sections = [
-            ("原始角色內容", character.source_text or "尚未提供。"),
+            ("目前套用設定", current_text(character)),
+            ("最近準備送出", diagnostic),
+            ("原始後台（保留原文）", '歷史來源原文；不會因更新而改寫。現在的稱呼／行為請看「目前套用設定」。\n\n'+(character.source_text or "尚未提供。")),
             ("外貌與身分", json.dumps({"identity": character.identity, "appearance": character.appearance}, ensure_ascii=False, indent=2)),
             ("關係／世界線", json.dumps({"active_worldline": self.worldline, "relationships": character.relationships}, ensure_ascii=False, indent=2)),
             ("待補欄位", "\n".join(character.pending_details) or "本次未列出特定待補項目；未提供的資料仍保留未知。"),
         ]
+        current_editor = None
         for title, text in sections:
             editor = QPlainTextEdit()
             editor.setReadOnly(True)
             editor.setPlainText(text)
             tabs.addTab(editor, title)
+            if title == '目前套用設定':
+                current_editor = editor
+        if ident == 'shogo':
+            repair = QPushButton('套用聖護已確認設定 · 先備份')
+            repair.setToolTip('只套用「月」、柔和常體／不敬語／僕及六條已確認行為；保留原後台、人格核心、其他角色及各 AU。免費，不送 API。')
+            def apply_confirmed():
+                if self.ai:
+                    self.ai.pause()
+                try:
+                    backup = self.store.apply_confirmed_shogo_address_update(force=True)
+                    self.characters = self.store.load_characters()
+                    updated = next(c for c in self.characters if c.id == ident)
+                    self.character_combo.setItemData(self.character_combo.currentIndex(), updated)
+                    current_editor.setPlainText(current_text(updated))
+                    tabs.setCurrentIndex(0)
+                    QMessageBox.information(dialog, '聖護設定已確認', '目前稱呼：月。柔和常體、不敬語、自稱僕及六條已確認行為已套用；原後台、人格與 AU 保留。\n'+(f'安全備份：{backup}\n' if backup else '本機已是這些設定，沒有重寫人格。\n')+'沒有呼叫 API。AI 已暫停；要繼續聊天時請手動啟用。')
+                except Exception:
+                    QMessageBox.warning(dialog, '更新未完成', '無法備份或更新本機設定；請保留原有資料。沒有呼叫 API。')
+            repair.clicked.connect(apply_confirmed)
+            layout.addWidget(repair)
         close = QPushButton("關閉")
         close.clicked.connect(dialog.accept)
         layout.addWidget(close)

@@ -667,3 +667,44 @@ def test_visual_evidence_describes_actual_payload_not_historical_observations(st
     assert ('確實附有一張指定視窗圖片' if with_image else '沒有附上圖片；不得聲稱看見目前畫面') in instructions
     assert '不能當成現在畫面的證據' in instructions
     assert context['recent_screen_events'][0]['summary']=='過去看見遊戲選單'
+
+
+def test_final_generation_review_uses_current_saved_shogo_after_full_history(store):
+    from dataclasses import replace
+    profiles=store.load_characters()
+    shogo=next(c for c in profiles if c.id=='shogo')
+    for _ in range(65):
+        store.append_message(speaker_id='shogo',speaker_name='聖護',text='はい、小鳥ちゃん。',source_kind='ai')
+    current=replace(shogo,user_address='月',tone='自然日文常體，較少使用敬語。')
+    store.save_character(current)
+    payload,upper=build_payload(AIConfig(),store.load_characters(),store,'main','user_reply')
+    assert len(payload['messages'])==3 and payload['messages'][-1]['role']=='system'
+    review=payload['messages'][-1]['content']
+    assert '"user_address": "月"' in review and '自然日文常體' in review
+    assert '不是聖護直接叫使用者的稱呼' in review and '小鳥ちゃん' in review
+    assert '喜歡主動表達愛意' in review and '真的表現不喜歡' in review
+    assert '"self_reference": "僕"' in review and '柔和不等於溫柔' in review
+    assert '第一季槙島聖護' in review and '已確認戀人的世界線' in review
+    assert upper==len(json.dumps(payload,ensure_ascii=False).encode())+2048
+    context=json.loads(payload['messages'][1]['content'][0]['text'])
+    assert len(context['characters'])==13 and len(context['recent_chat'])==60
+    assert len(store.messages())==65 and current.source_text==shogo.source_text
+
+
+def test_successful_request_diagnostic_matches_prepared_profile_without_keys_or_chat(app,store,monkeypatch):
+    window=MainWindow(UnsupportedBackend(),store.load_characters(),store)
+    try:
+        calls=setup_fake(window,monkeypatch)
+        assert window.ai.start('reply_test')
+        wait(lambda:window.ai.worker is None)
+        diagnostic=store.persona_preparation('main')
+        actual=json.loads(calls[0]['messages'][1]['content'][0]['text'])
+        assert diagnostic['characters']['shogo']['user_address']==actual['character_address_rules']['shogo']=='月'
+        assert len(diagnostic['characters'])==13 and diagnostic['model']=='gpt-4.1-mini'
+        assert 'mock-key-only' not in json.dumps(diagnostic) and 'recent_chat' not in diagnostic
+        assert not store.persona_preparation('glasshouse')
+        reopened=__import__('our_little_days.storage',fromlist=['SQLiteStore']).SQLiteStore(store.path)
+        try:assert reopened.persona_preparation('main')==diagnostic
+        finally:reopened.close()
+    finally:
+        window.close();app.processEvents()

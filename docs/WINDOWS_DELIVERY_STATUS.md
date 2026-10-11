@@ -1,5 +1,18 @@
 # Windows 試用包交付與驗證
 
+## 聖護目前設定診斷、柔和常體與僕 0.4.5
+
+- 下載：[Windows 自主陪伴 0.4.5](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.5-preview.zip)，私人 GitHub 檔案頁按 View raw；原十個 ZIP 保留。
+- 大小：59,108,560 bytes；SHA-256：`65e1dc873a0149fe1d3f6a3285b1320908ad336e6b9ca962bbf48d89d1cf6757`；EXE SHA-256：`f8055ce5e354816ab74865189c1e476c75211a35d1ceda5d8b4c5d55d748f9b8`。
+- 使用者確認 0.4.4 仍出現聖護的 REO 愛稱／敬語，設定查看器也未顯示新增內容。確認舊查看器僅顯示不可改写的 source_text，無法辨識其 Windows SQLite 是否已更新；不能以此推斷所有錯稱均來自介面。原始來源完整，未發現遺失。
+- 最新已確認：稱呼月、自稱僕、柔和日文常體、不使用敬語；柔和不等於溫柔，仍有點壞心眼。維持第一季槙島聖護人格，已確認戀人世界線對使用者有別於其他人，不因戀愛改成另一種人格；喜歡主動表達愛意、觀察反應，真的不喜歡時會停止。main／eleven_months／glasshouse／brothers 關係均不改、不混用。
+- 相比 0.4.4，角色檔只改 tone、language_rules.register、self_reference 與三條新增 behavior，稱呼月沿用；原 source_text／personality_core／appearance／identity／relationships 不變，其餘十二份逐位元組不變。完整性基準的原始快照不改，只登記本次已確認修改。
+- 舊 SQLite 新版一次性標記確保 0.4.4 已更新者也能升級；先安全備份再追加，不覆寫原核心、自訂內容、聊天或 AU。設定第一頁直接讀 SQLite，原始後台另頁保留；明確免費修復按鈕可再次套用已確認欄位，先暫停 AI。查看／修復不發 API、不需重做已成功的兩項成本測試。
+- 每世界線保存最近一次請求準備所用稱呼／自稱／語氣／行為及來源雜湊，與 payload 同一份角色資料；無 Key、聊天全文、圖片。準備紀錄早於預算預留，不等於平台已收到、收費或遵守設定，舊請求不能回溯。
+- 完整十三人格後再加入聖護目前設定核對，避免歷史錯誤及 REO 語氣混用；額外核對纳入保守輸入預算。同批仍一次 API、輸出上限 2000，所有功能共用原月預算，沒有付款／儲值／自動重試／字串改寫。
+- **164 passed、2 Windows-only skipped**；十三人格稽核、Qt smoke、依賴檢查通過。含舊標記升級、新查看器讀取 SQLite 而非快取、免費修復備份與原資料保存、最新設定進入末尾核對與完整預算計入、準備診斷重開保存且無 Key 等測試。
+- 真正 Windows frozen EXE 的 Linux + Wine 封裝檢查通過，含新查看器／月／僕／柔和常體不敬語診斷及免費檢查；原單次／群聊模擬 API、DPAPI、SQLite 重開備份、官方 wheel／Whisper 來源及公開 tiny 語音參考檢查通過。**0.4.5 真正 Windows 實機與正式模型口吻仍待觀察**。未使用真實 API Key 或付費請求。
+
 ## 聖護稱呼、愛意與互動界線 0.4.4
 
 - 下載：[Windows 自主陪伴 0.4.4](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.4-preview.zip)，私人 GitHub 檔案頁按 View raw。原九個 ZIP 保留。

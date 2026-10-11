@@ -108,3 +108,42 @@ def test_confirmed_restore_reloads_visible_history_and_stops_capture(app, store,
     finally:
         window.close()
         app.processEvents()
+
+
+def test_inspect_current_profile_and_explicit_repair_without_paid_request(app,store,monkeypatch):
+    from dataclasses import replace,asdict
+    from PySide6.QtWidgets import QDialog,QTabWidget,QPushButton
+    window=MainWindow(DemoBackend(),store.load_characters(),store)
+    try:
+        window.character_combo.setCurrentIndex(11)
+        original=next(c for c in store.load_characters() if c.id=='shogo')
+        store.apply_confirmed_shogo_address_update()
+        store.save_character(replace(original,user_address='本機舊稱呼',tone='舊語氣',language_rules={**original.language_rules,'register':'全敬語'}))
+        before=[c for c in store.load_characters() if c.id!='shogo']
+        store.append_message(speaker_id='shogo',speaker_name='聖護',text='小鳥ちゃん',source_kind='ai')
+        messages=store.messages()
+        checks=[]
+        monkeypatch.setattr(QMessageBox,'information',lambda *args:None)
+        def inspect(dialog):
+            tabs=dialog.findChild(QTabWidget)
+            assert tabs.tabText(0)=='目前套用設定'
+            assert '平常稱呼：本機舊稱呼' in tabs.widget(0).toPlainText()  # Fresh SQLite, not cached combo.
+            assert 'かみそりちゃん' in tabs.widget(2).toPlainText()
+            assert '保留舊來源' in tabs.widget(0).toPlainText()
+            assert '尚無新版' in tabs.widget(1).toPlainText()
+            repair=next(b for b in dialog.findChildren(QPushButton) if b.text().startswith('套用聖護'))
+            QTest.mouseClick(repair,Qt.MouseButton.LeftButton)
+            assert '平常稱呼：月' in tabs.widget(0).toPlainText()
+            assert '不使用敬語' in tabs.widget(0).toPlainText() and '自稱：僕' in tabs.widget(0).toPlainText() and '真的表現不喜歡' in tabs.widget(0).toPlainText()
+            checks.append(True)
+            return QDialog.DialogCode.Accepted
+        monkeypatch.setattr(QDialog,'exec',inspect)
+        window.inspect_character()
+        assert checks and window.ai.ledger.totals()['month']['requests']==0
+        updated=next(c for c in store.load_characters() if c.id=='shogo')
+        assert updated.user_address=='月' and updated.source_text==original.source_text
+        assert updated.relationships==original.relationships and store.messages()==messages
+        assert [c for c in store.load_characters() if c.id!='shogo']==before
+        assert list((store.path.parent/'backups').glob('before-shogo-address-*.sqlite3'))
+    finally:
+        window.close();app.processEvents()

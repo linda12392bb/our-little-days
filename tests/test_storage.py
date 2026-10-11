@@ -197,8 +197,8 @@ def test_confirmed_shogo_update_migrates_existing_data_once_without_losing_perso
     from dataclasses import replace, asdict
     profiles = store.load_characters()
     old = next(c for c in profiles if c.id=='shogo')
-    original_behavior = tuple(b for b in old.behavior if b not in ('平常稱呼使用者為「月」。', '喜歡主動表達愛意；維持原作人格與獨立思考，依各世界線已確認關係互動，不以愛意擅自推進或改寫關係狀態。', '喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。'))
-    legacy = replace(old, user_address='かみそりちゃん', behavior=(*original_behavior,'自訂既有行為'))
+    original_behavior = tuple(b for b in old.behavior if b not in ('平常稱呼使用者為「月」。', '喜歡主動表達愛意；維持原作人格與獨立思考，依各世界線已確認關係互動，不以愛意擅自推進或改寫關係狀態。', '喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。', '以柔和的自然日文常體說話，不使用敬語；日文自稱「僕」，不套用 REO 的全敬語模式。', '語氣柔和不等於溫柔；仍會有點壞心眼，不改成一味體貼、順從的性格。', '人格維持《PSYCHO-PASS》第一季槙島聖護；在已確認戀人的世界線，對使用者的對待與其他人有差別，但不因戀愛改成另一種人格。'))
+    legacy = replace(old, user_address='かみそりちゃん', behavior=(*original_behavior,'自訂既有行為'), tone='既有自訂語氣。', self_reference=None, language_rules={**old.language_rules, 'register':'依角色語氣'})
     store.save_character(legacy)
     store.append_message(speaker_id='shogo', speaker_name='聖護', text='小鳥ちゃん', source_kind='ai')
     store.add_memory('正式約會記憶', character_id='shogo')
@@ -207,10 +207,14 @@ def test_confirmed_shogo_update_migrates_existing_data_once_without_losing_perso
     assert safety and safety.is_file()
     updated = next(c for c in store.load_characters() if c.id=='shogo')
     a,b = asdict(legacy),asdict(updated)
-    assert {key for key in a if a[key]!=b[key]} == {'user_address','behavior'}
+    assert {key for key in a if a[key]!=b[key]} == {'user_address','behavior','tone','language_rules','self_reference'}
     assert updated.user_address=='月' and '自訂既有行為' in updated.behavior
     assert any('喜歡主動表達愛意' in b for b in updated.behavior)
-    assert updated.behavior[-1]=='喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。'
+    assert '喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。' in updated.behavior
+    assert '以柔和的自然日文常體說話，不使用敬語；日文自稱「僕」，不套用 REO 的全敬語模式。' in updated.behavior
+    assert '語氣柔和不等於溫柔；仍會有點壞心眼，不改成一味體貼、順從的性格。' in updated.behavior
+    assert updated.behavior[-1]=='人格維持《PSYCHO-PASS》第一季槙島聖護；在已確認戀人的世界線，對使用者的對待與其他人有差別，但不因戀愛改成另一種人格。'
+    assert updated.tone.startswith(legacy.tone) and updated.language_rules['register']=='柔和的自然日文常體；不使用敬語'
     assert updated.source_text==legacy.source_text and updated.relationships==legacy.relationships
     assert [c for c in store.load_characters() if c.id!='shogo']==[c for c in profiles if c.id!='shogo']
     assert store.messages()==before_messages and store.memories()==before_memories
@@ -222,3 +226,21 @@ def test_confirmed_shogo_update_migrates_existing_data_once_without_losing_perso
     store.save_character(replace(updated, user_address='使用者後續自訂'))
     assert store.apply_confirmed_shogo_address_update() is None
     assert next(c for c in store.load_characters() if c.id=='shogo').user_address=='使用者後續自訂'
+
+
+def test_shogo_register_update_applies_after_previous_044_address_marker(store):
+    shogo = next(c for c in store.load_characters() if c.id=='shogo')
+    legacy = replace(shogo, behavior=shogo.behavior[:-3], self_reference=None,
+                     tone='自然日文，從容。', language_rules={**shogo.language_rules, 'register':'依角色語氣'})
+    store.save_character(legacy)
+    with store.connection:
+        store.connection.execute('INSERT INTO settings VALUES (?,?)',
+                                 ('confirmed:shogo-address-affection-2026-10-11', '{}'))
+    safety = store.apply_confirmed_shogo_address_update()
+    assert safety and safety.is_file()
+    current = next(c for c in store.load_characters() if c.id=='shogo')
+    assert current.user_address=='月' and current.self_reference=='僕'
+    assert '不使用敬語' in current.language_rules['register']
+    assert current.behavior==shogo.behavior
+    assert current.source_text==legacy.source_text and current.relationships==legacy.relationships
+    assert store.apply_confirmed_shogo_address_update() is None

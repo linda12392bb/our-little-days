@@ -1,8 +1,8 @@
 # ☾ 月色不打烊｜公寓還是一樣很吵
 
-OUR LITTLE DAYS · Windows 本機十三聲道陪伴室 · 自主陪伴試用版 0.4.4
+OUR LITTLE DAYS · Windows 本機十三聲道陪伴室 · 自主陪伴試用版 0.4.5
 
-[下載 Windows 試用包](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.4-preview.zip)：在 GitHub 檔案頁按 **View raw**。全部解壓後雙擊 OurLittleDays.exe，保留 _internal 與 speech-runtime；不需 Python、原始碼、指令或雲端網站。
+[下載 Windows 試用包](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.5-preview.zip)：在 GitHub 檔案頁按 **View raw**。全部解壓後雙擊 OurLittleDays.exe，保留 _internal 與 speech-runtime；不需 Python、原始碼、指令或雲端網站。
 
 [自動語音輸入與測試](docs/VOICE_INPUT.md) · [新手啟動與 API 設定](docs/WINDOWS_USER_GUIDE.md) · [Windows 實測清單](docs/WINDOWS_TEST_CHECKLIST.md) · [Phase 2/3 設計與費用界線](docs/PHASE2_3.md)
 
@@ -10,6 +10,7 @@ OUR LITTLE DAYS · Windows 本機十三聲道陪伴室 · 自主陪伴試用版 
 
 ## 本次功能
 
+- 聖護維持第一季槙島聖護人格，平常稱呼「月」、自稱僕、柔和常體不使用敬語，仍有點壞心眼；已確認戀人世界線對使用者的態度不同，各 AU 保持獨立。設定查看器直接顯示本機目前設定，另保留原始後台；免費修復先備份，不新增 API 請求。
 - 手動開啟麥克風後自動偵測，不需按鍵說話；本機 WebRTC VAD、多語 Whisper 離線辨識，支援小聲短片段、繁中／日文與混合語句。
 - 可調門檻、增益與 1.5 秒停語判定，音量與文字預覽、可取消自動送出；麥克風預設關閉，原始音訊只在 RAM，辨識文字保存預設關閉。
 - 語音文字與指定視窗接入原十三聲道引擎，共用 API 預算；首次明確下載免費離線模型，安靜時不呼叫辨識 API。
@@ -49,7 +50,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/smoke_ui.py
 
 已有的雲端環境僅用於開發／測試，不是產品部署。使用隔離工作目錄，不需建立新 worktree。原生擷取與 DPAPI 測試需 Windows；模擬 API 測試不證明真正模型品質。
 
-Windows 打包：開發者雙擊「製作Windows執行檔.cmd」，或在 Windows x64 Python 跑 scripts/build_windows.py。產物：artifacts/OurLittleDays-Windows-x64-Companion-0.4.4-preview.zip。
+Windows 打包：開發者雙擊「製作Windows執行檔.cmd」，或在 Windows x64 Python 跑 scripts/build_windows.py。產物：artifacts/OurLittleDays-Windows-x64-Companion-0.4.5-preview.zip。
 
 正式原始角色與稽核：[角色匯入](docs/CHARACTER_IMPORT.md)、[完整性修復](docs/CHARACTER_REPAIR_CHECK.md)、[已確認補充](docs/CHARACTER_UPDATES.md)。十三 source_text 保留，種子只初始化；唯一已授權資料補充是序調戲／♡，合併前備份。SQLite 設計：[PERSISTENCE.md](docs/PERSISTENCE.md)。
 

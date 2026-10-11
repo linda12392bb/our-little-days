@@ -169,30 +169,53 @@ class SQLiteStore:
             if count != 1:
                 raise StorageError("角色不存在。")
 
-    def apply_confirmed_shogo_address_update(self):
+    def apply_confirmed_shogo_address_update(self, *, force=False):
         """One approved update; preserve original text, custom traits and all AU relations."""
-        marker = 'confirmed:shogo-address-affection-2026-10-11'
-        if self.connection.execute('SELECT 1 FROM settings WHERE key=?', (marker,)).fetchone():
+        marker = 'confirmed:shogo-address-register-2026-10-11'
+        if not force and self.connection.execute('SELECT 1 FROM settings WHERE key=?', (marker,)).fetchone():
             return None
         shogo = next(c for c in self.load_characters() if c.id == 'shogo')
         behavior = list(shogo.behavior)
         for addition in ('平常稱呼使用者為「月」。',
                          '喜歡主動表達愛意；維持原作人格與獨立思考，依各世界線已確認關係互動，不以愛意擅自推進或改寫關係狀態。',
-                         '喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。'):
+                         '喜歡看使用者的各種反應；當使用者真的表現不喜歡時，會停下當下的互動。',
+                         '以柔和的自然日文常體說話，不使用敬語；日文自稱「僕」，不套用 REO 的全敬語模式。',
+                         '語氣柔和不等於溫柔；仍會有點壞心眼，不改成一味體貼、順從的性格。',
+                         '人格維持《PSYCHO-PASS》第一季槙島聖護；在已確認戀人的世界線，對使用者的對待與其他人有差別，但不因戀愛改成另一種人格。'):
             if addition not in behavior:
                 behavior.append(addition)
-        changed = shogo.user_address != '月' or behavior != list(shogo.behavior)
+        tone = shogo.tone or ''
+        if '不使用敬語' not in tone or '柔和' not in tone:
+            tone += '語氣柔和，以常體說話，不使用敬語。日文自稱「僕」。'
+        rules = dict(shogo.language_rules or {})
+        rules['register'] = '柔和的自然日文常體；不使用敬語'
+        changed = shogo.user_address != '月' or behavior != list(shogo.behavior) or tone != shogo.tone or rules != shogo.language_rules or shogo.self_reference != '僕'
         safety = None
         if changed:
             safety = self.path.parent / 'backups' / f'before-shogo-address-{taipei_now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.sqlite3'
             self.backup(safety)
         with self.connection:
             if changed:
-                updated = replace(shogo, user_address='月', behavior=tuple(behavior))
+                updated = replace(shogo, user_address='月', behavior=tuple(behavior), tone=tone, language_rules=rules, self_reference='僕')
                 self.connection.execute('UPDATE characters SET profile_json=?,updated_at=? WHERE id=?',
                                         (encode(asdict(updated)), taipei_now().isoformat(), 'shogo'))
-            self.connection.execute('INSERT INTO settings VALUES(?,?)', (marker, encode({'user_address':'月','proactive_affection':True})))
+            self.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (marker, encode({'user_address':'月','proactive_affection':True})))
         return safety
+
+    def record_persona_preparation(self, characters, worldline, kind, model):
+        """Local diagnostic only; never contains keys, screenshots or chat text."""
+        import hashlib
+        value = {'prepared_at': taipei_now().isoformat(), 'worldline': worldline, 'kind': kind, 'model': model,
+                 'characters': {c.id: {'user_address': c.user_address, 'tone': c.tone, 'self_reference': c.self_reference, 'behavior': list(c.behavior), 'language_rules': c.language_rules,
+                                      'source_text_sha256': hashlib.sha256((c.source_text or '').encode()).hexdigest()}
+                                for c in characters}}
+        with self.connection:
+            self.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                    ('ai-persona-preparation:'+worldline, encode(value)))
+
+    def persona_preparation(self, worldline):
+        row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('ai-persona-preparation:'+worldline,)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def set_relationship(self, character_id, worldline, relation, *, confirmed=False):
         if not confirmed:

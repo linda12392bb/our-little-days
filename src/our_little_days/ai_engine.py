@@ -146,12 +146,21 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
         instructions += '\n引用先前訊息時，reply_to_message_id 與 recipient_ids 必須使用 schema 同一分支：對象只填該訊息真正說話者的 ID。新開話題或同批接話則 reply_to_message_id=null，切勿把歷史 ID 搭配另一位角色。'
     exposed_speakers = {row['id']: row['speaker_id'] for row in [*recent, *ongoing['anchor_messages']]}
     schema = response_schema(characters, kind, selected, exposed_speakers)
-    payload = {'model': config.model, 'messages': [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': content}],
+    review = '生成前逐則核對 speaker_id 自己的稱呼、語氣與完整人格；不要讓前一位角色或歷史錯誤代替目前設定。核對過程不輸出，只回傳指定 JSON。'
+    shogo = next(c for c in characters if c.id == 'shogo')
+    reo = next(c for c in characters if c.id == 'reo')
+    review += '\n聖護目前保存的稱呼與行為：' + json.dumps({'user_address': shogo.user_address, 'tone': shogo.tone, 'self_reference': shogo.self_reference, 'language_rules': shogo.language_rules, 'behavior': list(shogo.behavior)}, ensure_ascii=False)
+    review += '\n聖護直接稱呼使用者時，以目前 user_address 為準；保留後台原文中的較早稱呼不是本次更新被撤銷。維持第一季槙島聖護的思考方式與自然日文，不套用 REO 的全敬語客服模板，不必每句稱呼。'
+    if reo.user_address and reo.user_address != shogo.user_address:
+        review += '\n' + json.dumps(reo.user_address, ensure_ascii=False) + ' 是 REO 的稱呼，不是聖護直接叫使用者的稱呼；可以引用或討論 REO 的話，但不要將它當成聖護自己的愛稱。'
+    payload = {'model': config.model, 'messages': [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': content}, {'role': 'system', 'content': review}],
                'max_completion_tokens': config.max_output_tokens,
                'response_format': {'type': 'json_schema', 'json_schema': {'name': 'apartment_turn', 'strict': True, 'schema': schema}}}
     # Conservative text cap: <= one token per UTF-8 byte + structural overhead.
     # Images <=960px; 32768 extra input tokens exceeds supported models' image accounting.
-    text_bytes = len(json.dumps({**payload, 'messages': [payload['messages'][0], {'role': 'user', 'content': [content[0]]}]}, ensure_ascii=False).encode())
+    text_only_messages = [{**message, 'content': [part for part in message['content'] if part['type'] != 'image_url']}
+                          if isinstance(message['content'], list) else message for message in payload['messages']]
+    text_bytes = len(json.dumps({**payload, 'messages': text_only_messages}, ensure_ascii=False).encode())
     upper = text_bytes + 2048 + (32768 if image is not None else 0)
     if upper + config.max_output_tokens > 120_000:
         raise AIError('完整人格、記憶與歷史超過此版本安全上下文容量；請先整理記憶，不會刪減人格或發送付費請求。')

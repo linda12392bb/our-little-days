@@ -107,7 +107,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.4.4",
+        "version": "0.4.5",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -119,13 +119,13 @@ def main():
         "whisper_runtime": speech_manifest,
         "windows_manual_acceptance": "not_run",
         "signing": "unsigned",
-        "scope": "Confirmed Shogo address 月 and proactive affection applied once with backup, preserving source/personality/AU. Per-speaker address and register isolation, explicit actual image evidence, historical errors not treated as persona changes. Existing input pinning, peer continuity, offline voice and all-request budget retained; native live API quality pending.",
+        "scope": "Shogo confirmed soft plain Japanese/no keigo/僕 applied with backup. Viewer displays fresh SQLite settings and per-worldline prepared persona diagnostics separately from retained source; explicit free repair available. Final generation review uses current Shogo identity and is included in input budget. Full 13 personas, memories, AU and shared budget preserved; native live model acceptance pending.",
     }
     (folder / "BUILD_INFO.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.4-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.5-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():

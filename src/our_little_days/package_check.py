@@ -126,6 +126,25 @@ def _check_manual_buttons(window):
         records = window.store.messages()[-2:]
         assert records[0]['speaker_id'] == 'user' and records[1]['reply_to'] == records[0]['id']
         assert c.enabled and c.quiet_enabled and len(warnings) == 1
+        from PySide6.QtWidgets import QDialog, QTabWidget
+        window.character_combo.setCurrentIndex(11)
+        original_exec = QDialog.exec
+        viewed = []
+        def inspect(dialog):
+            tabs = dialog.findChild(QTabWidget)
+            assert tabs.tabText(0) == '目前套用設定'
+            assert '平常稱呼：月' in tabs.widget(0).toPlainText()
+            assert '不使用敬語' in tabs.widget(0).toPlainText() and '自稱：僕' in tabs.widget(0).toPlainText()
+            assert '準備使用的稱呼：月' in tabs.widget(1).toPlainText()
+            assert 'かみそりちゃん' in tabs.widget(2).toPlainText()
+            viewed.append(True)
+            return QDialog.DialogCode.Accepted
+        try:
+            QDialog.exec = inspect
+            window.inspect_character()
+            assert viewed and len(calls) == 4
+        finally:
+            QDialog.exec = original_exec
     finally:
         (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
          c.keys.read, c.keys.exists, c.config) = saved
@@ -157,7 +176,7 @@ def check_package(speech_test_dir=None):
         try:
             store.seed(characters, load_apartment_settings())
             shogo = next(c for c in characters if c.id == 'shogo')
-            legacy = replace(shogo, user_address='かみそりちゃん', behavior=tuple(shogo.behavior[:-3]))
+            legacy = replace(shogo, user_address='かみそりちゃん', behavior=tuple(shogo.behavior[:-6]))
             store.save_character(legacy)
             assert store.apply_confirmed_shogo_address_update().is_file()
             assert store.apply_confirmed_shogo_address_update() is None
@@ -227,6 +246,7 @@ def check_package(speech_test_dir=None):
             checks.append('frozen manual reply button works while AI paused; strict selected ID schema, safe failure dialog with settled usage and success dialog verified with mock provider, no network or retry')
             checks.append('frozen quiet_test button creates light-to-order-to-reo peer replies in one mock request; null model indexes resolved locally to prior explicit recipients and persisted; scheduler remains OFF')
             checks.append('frozen send button replies immediately to pinned typed input while quiet mode remains ON; history-ID schema couples each ID with its true speaker, no network')
+            checks.append('frozen persona viewer shows actual SQLite 月 address, soft plain Japanese/no keigo/僕 and prepared request diagnostic separately from retained original source; inspection makes no API call')
             continuity = store.conversation_state('main')
             messages = store.messages()
             checks.append('quiet chat defaults OFF; 3-minute local check, 2000 shared output cap, NT$10 daily cap and persistent cross-batch peer replies verified with synthetic data, no API')

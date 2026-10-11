@@ -250,6 +250,7 @@ class AIController(QObject):
             if image is None and kind == 'screen_test':
                 image = self.window.frame_image
             payload, upper = build_payload(self.config, characters, self.window.store, worldline, kind, image, selected, current_input)
+            self.window.store.record_persona_preparation(characters, worldline, kind, self.config.model)
             request_id, reserve = self.ledger.reserve(self.config, kind, upper)
         except QuietBudgetExhausted as exc:
             self.quiet_blocked_day = taipei_now().isoformat()[:10]
