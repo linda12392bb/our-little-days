@@ -51,6 +51,16 @@ class PeerConversationError(AIError):
     """A completed autonomous turn failed to address another resident."""
 
 
+class VoiceContractError(AIError):
+    def __init__(self, notes):
+        self.notes = notes
+        super().__init__('聖護本次語體未通過：'+'；'.join(notes)+'。整批未寫入聊天，不改寫台詞，不自動重試。')
+
+
+SHOGO_DELIVERIES = ('observation_plain', 'question_plain', 'judgment_plain',
+                    'counter_plain', 'teasing_plain', 'affection_plain', 'everyday_plain')
+
+
 RESIDENT_CONVERSATION_KINDS = {'quiet_chat', 'quiet_test', 'screen_event'}
 
 
@@ -62,8 +72,7 @@ def shogo_voice_description(character):
             '異論を述べる、少しからかう。毎回質問や哲学の演説をする必要はない。'
             '柔らかな常体で、一人称・呼び方は本人の保存設定に従う。'
             '敬語の語尾だけを落とした慰めや全員の気持ちの代弁にしない。'
-            '過去の「僕たちは君との時間を大切にしていますよ」のような一律の安心保証は、'
-            'この話者の判断と会話の目的が抜けた失敗例。常体に直した同文も模倣しない。'
+            '集団の気持ちを代弁する一律の安心保証ではなく、自分で判断する。'
             '恋人への愛情と独立した判断を両立し、本当に嫌がったらやめる。'
             '他人の台詞の引用は本人の話し方と区別する。'
             '\n現在の設定：'+json.dumps({'user_address':character.user_address,
@@ -171,6 +180,8 @@ def response_schema(characters, kind, selected, exposed_speakers, plan=None):
     bind_shogo = kind not in {'screen_test'} and (kind!='reply_test' or selected=='shogo')
     if bind_shogo:
         schema.setdefault('$defs', {})['other_resident_id']={'type':'string','enum':[i for i in ids if i!='shogo']}
+        schema['$defs']['shogo_delivery']={'type':'string','enum':list(SHOGO_DELIVERIES),
+            'description':'本人が今伝える目的を常体で選ぶ。観察・問い・判断・異論・からかい・愛情・日常のいずれか。目的に合う自分の文を作り、丁寧体を作って語尾だけ置き換える処理にしない。思考の説明は出力しない。'}
     arrays=[]
     for tier,limits in enumerate(plan['participant_ranges']):
         branch=deepcopy(messages)
@@ -190,6 +201,12 @@ def response_schema(characters, kind, selected, exposed_speakers, plan=None):
                 dedicated=deepcopy(item)
                 dedicated['properties']['speaker_id']={'type':'string','enum':['shogo']}
                 dedicated['properties']['segments']={'$ref':'#/$defs/'+ref_name}
+                # Put the speaker's delivery choice before his actual words in
+                # the decoder's property order, not in a later advisory.
+                own_fields=dedicated['properties']
+                dedicated['properties']={**{k:v for k,v in own_fields.items() if k!='segments'},
+                    'delivery':{'$ref':'#/$defs/shogo_delivery'},'segments':own_fields['segments']}
+                dedicated['required']=list(dedicated['properties'])
                 if kind!='reply_test':
                     item['properties']['speaker_id']={'$ref':'#/$defs/other_resident_id'}
                     bound.append(item)
@@ -237,6 +254,22 @@ def reply_quality_notes(character, text, characters, *, image_attached=None):
                 notes.append('本次未附圖，卻出現看見目前畫面的肯定描述')
                 break
     return notes
+
+
+def check_current_voice(turn, characters):
+    """Gate a new API turn; never repair text or reevaluate stored old chats."""
+    shogo=next(c for c in characters if c.id=='shogo')
+    if not shogo.language.startswith('ja') or '不使用敬語' not in (shogo.language_rules or {}).get('register',''):
+        return
+    for message in turn['messages']:
+        if message['speaker_id']!='shogo':
+            continue
+        notes=reply_quality_notes(shogo,'\n'.join(s['text'] for s in message['segments']),characters)
+        violations=[n for n in notes if '敬語句尾' in n or '直接使用其他角色的稱呼' in n]
+        if message.get('delivery') not in SHOGO_DELIVERIES:
+            violations.append('未提供本人的常體表達目的')
+        if violations:
+            raise VoiceContractError(violations)
 
 
 def build_payload(config, characters, store, worldline, kind, image=None, selected=None, current_input=None):
@@ -312,6 +345,8 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
     if shogo.language.startswith('ja') and '不使用敬語' in (shogo.language_rules or {}).get('register',''):
         review += '\nspeaker_id=shogo の台詞と地の文：常体を使い、丁寧語・敬語で話さない。柔らかな語調でも優しい従順な人物に作り替えない。少し意地悪なところと第一期の槙島聖護の独立した判断を保つ。呼び方と一人称は上の shogo の行に従う。他の住人の呼び方や口調を借りない。引用は引用として区別する。'
     review += '\n聖護は自分の視点・判断と今の会話の目的を保つ。schema 内の本人専用 text の説明と保存された対話参考を参照する。口調、文の運び、考え方を一緒に選び、客服の敬語だけを外した文章にはしない。画面の内容を見ただけなら、誰かの気持ちや行動の理由を事実として断定しない。'
+    if kind!='screen_test':
+        review += '\n聖護専用の生成順序：自分が何を伝えるかを delivery で選び、その目的から最初から常体の文を作る。自分の判断なら「だ」「だろうね」、確認するなら「ということかな」「君はどう思う？」など、目的に合う自然な常体を使う。これらは文法の選択肢で、毎回の固定台詞ではない。先に丁寧体を書いて語尾を削るのではなく、自分の観察・関心から文を組み立てる。ユーザーが事実を訂正した時は、その訂正を受けて自分の考えを続ける；接客の確認係にならない。過去の AI 発言は出来事の資料であり、voice_note のある文は話し方の見本に使わない。発言前に自分の本文と地の文を常体で読み直し、丁寧体が残っていたら同じ出力内で全文と翻訳を作り直してから完成させる。選択ラベル以外の思考過程は出力しない。'
     request_input = current_input
     if kind=='user_reply' and request_input is None:
         latest = next((r for r in reversed(recent) if r['speaker_id']=='user' and r['source_kind'] in {'user','voice'}), None)
@@ -420,6 +455,7 @@ def save_turn(store, worldline, turn, characters, kind, user_message_id="latest"
         return []
     if kind == 'screen_event' and (not turn['meaningful'] or event_seen(store, worldline, turn['event_key'])):
         return []
+    check_current_voice(turn,characters)
     ids = {c.id: c for c in characters}
     records = []
     # Atomic turn: nested append_message() commits are avoided by direct SQL here.

@@ -164,7 +164,7 @@ def test_roster_tracks_latest_input_with_explicit_read_and_reopen(app,store):
         current=store.append_message(speaker_id='user',speaker_name='月',text='本輪只有聖護回覆')
         window.render_message(current)
         assert all(v.text()=='· 未出場' for v in window.roster_labels.values())
-        turn={'read_character_ids':['reo'], 'messages':[{'speaker_id':'shogo','recipient_ids':['user'], 'reply_to_index':None,'reply_to_message_id':None,'segments':[{'text':'月、僕はここにいるよ。','translation':'月，我就在這裡。'}]}]}
+        turn={'read_character_ids':['reo'], 'messages':[{'speaker_id':'shogo','delivery':'everyday_plain','recipient_ids':['user'], 'reply_to_index':None,'reply_to_message_id':None,'segments':[{'text':'月、僕はここにいるよ。','translation':'月，我就在這裡。'}]}]}
         record=save_turn(store,'main',turn,store.load_characters(),'user_reply',current['id'])[0]
         window.render_message(record)
         assert window.roster_labels['shogo'].text()=='○ 已回覆'

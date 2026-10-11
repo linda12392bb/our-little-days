@@ -454,7 +454,7 @@ class MainWindow(QMainWindow):
         for widget in (self.voice_save, self.voice_auto):
             widget.toggled.connect(lambda *_: self.voice.preference_changed() if self.voice else None)
         controls_layout.addStretch()
-        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.10", "sectionTitle"))
+        controls_layout.addWidget(label("Windows 本機 · 自主陪伴試用 0.4.11", "sectionTitle"))
         controls_layout.addWidget(label("聊天與角色資料永久保存在本機。\n不錄影、不存截圖。只有手動啟用 AI 後，\n選定視窗圖片與所需文字才會傳送 API。\n暫停觀察不會刪除記憶。", "hint", True))
         controls_scroll = QScrollArea()
         controls_scroll.setWidgetResizable(True)
@@ -465,7 +465,7 @@ class MainWindow(QMainWindow):
         controls_scroll.setWidget(controls)
         columns.addWidget(controls_scroll)
         columns.setSizes([170, 620, 285])
-        outer.addWidget(label("自主陪伴試用 0.4.10  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
+        outer.addWidget(label("自主陪伴試用 0.4.11  /  安靜群聊 · 本機辨識 · 十三聲道                         ☾ 給日常留一盞燈", "footer"))
         self.update_controls()
 
     def apply_theme(self, *_):
@@ -777,6 +777,8 @@ class MainWindow(QMainWindow):
             notes = [note for warning in result['warnings'] if warning['character_id']==ident for note in warning['notes']]
             image_status = {True:'是；僅一張指定視窗圖片', False:'否；不能聲稱看見當前畫面', None:'未記錄，無法判定'}[result.get('image_attached')]
             reply_check = f'完成時間：{result["completed_at"]}\n世界線：{result["worldline"]}\nAPI 回報模型：{result.get("provider_model") or "API 未提供"}\n本次實際附圖：{image_status}\n這位住戶在該批發言：{"是" if participated else "否；不能因此判定遵守語體"}\n\n這位住戶的檢查提示：\n' + ('\n'.join('• '+note for note in notes) if notes else '未命中目前檢查項目；不代表完整人格品質已通過。') + '\n\n檢查針對常見直接稱呼、敬語句尾及未附圖的看見聲明，可能漏判或誤判，不是完整日文語法判定。引用不當成直接稱呼。原始回覆保留，不自動重試或改寫，也不因這些提示關閉全部 AI。此頁只讀本機紀錄，不呼叫 API。'
+            if result.get('rejected'):
+                reply_check='本批語體檢查未通過，整批未寫入聊天；沒有改寫或付費重試。舊聊天保留。\n\n'+reply_check.replace('原始回覆保留','本次違規回覆未保存成角色發言')
         sections = [
             ("目前套用設定", current_text(character)),
             ("最近準備送出", diagnostic),
@@ -789,7 +791,7 @@ class MainWindow(QMainWindow):
         api_result=self.store.api_result(self.worldline)
         api_text='這條世界線尚無新版 API 結果紀錄。舊版失敗回應未保存這些診斷，不能倒推異常原因。查看不呼叫 API。'
         if api_result:
-            status={'output_limit':'API 回報截斷；沒有自動重試','accepted':'已完成格式檢查；不代表人格品質通過','validation_pending':'已收到；尚無通過格式檢查的紀錄'}.get(api_result['status'],api_result['status'])
+            status={'voice_rejected':'聖護語體未通過；整批未寫入聊天，不自動重試','output_limit':'API 回報截斷；沒有自動重試','accepted':'已完成格式與已知語體檢查；不代表完整人格品質通過','validation_pending':'已收到；尚無通過格式檢查的紀錄'}.get(api_result['status'],api_result['status'])
             api_text='\n'.join([f'收到時間：{api_result["received_at"]}',f'世界線：{api_result["worldline"]}',f'任務：{api_result["kind"]}',f'API 回報模型：{api_result.get("provider_model") or "API 未提供"}',f'結束原因：{api_result.get("finish_reason")}',f'結果：{status}',f'API 實際回報輸入：{api_result["prompt_tokens"]} tokens',f'API 實際回報輸出：{api_result["completion_tokens"]} tokens',f'本次設定輸出上限：{api_result["configured_output_limit"]} tokens',f'本機估算費用：NT${api_result["estimated_twd"]:.4f}',f'回應 JSON 可解析：{"是" if api_result["content_json_complete"] else "否"}',f'回應字元數：{api_result["generated_characters"]}（不是 token 數）',f'其中空白字元數：{api_result["whitespace_characters"]}',f'speaker_id 欄位出現次數：{api_result["message_field_occurrences"]}（含未完成訊息，不等於發言人數）',f'發言／敘事 kind 欄位出現次數：{api_result["segment_field_occurrences"]}',f'完整 text 欄位數：{api_result["complete_text_field_count"]}',f'其中重複完整 text 欄位數：{api_result["repeated_complete_text_fields"]}', '', '這是當前世界線最近一批請求，不代表選取角色在該批發言。用量來自 API 回報，費用是程式換算；實際帳單以平台為準。這些計數只能協助診斷，不能單獨證明異常原因。沒有保存原始回應副本、金鑰或截圖；查看免費、不重試。'])
         sections.append(('最近 API 結果',api_text))
         current_editor = None

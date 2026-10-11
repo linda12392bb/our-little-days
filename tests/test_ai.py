@@ -749,6 +749,8 @@ def residents_turn(profiles):
         messages.append({'speaker_id':c.id,'recipient_ids':['user' if i==0 else profiles[i-1].id],
                          'reply_to_index':None,'reply_to_message_id':None,
                          'segments':[{'kind':'speech','text':native,'translation':'在這裡。' if c.translation_required else ''}]})
+    for message in messages:
+        if message['speaker_id']=='shogo':message['delivery']='everyday_plain'
     return {'meaningful':False,'event_key':'','summary':'','important':False,'read_character_ids':[],'messages':messages}
 
 
@@ -931,12 +933,28 @@ def test_approved_shogo_dialogue_is_reference_not_script_or_new_memory(store):
     assert not store.messages() and not store.memories() and not store.events()
 
 
-def test_shogo_check_survives_other_speaker_batch_and_ui_reopen(app,store):
+def seed_legacy_voice_record(store, value, profiles, *, image_attached, response_model=None):
+    """Represent retained 0.4.10 data, without using the new live-turn write gate."""
+    m=value['messages'][0];character=next(c for c in profiles if c.id==m['speaker_id'])
+    text='\n'.join(seg['text']+'\n（'+seg['translation']+'）' for seg in m['segments'])
+    record=store.append_message(speaker_id=character.id,speaker_name=character.name,text=text,source_kind='ai',recipient_ids=m['recipient_ids'])
+    notes=reply_quality_notes(character,'\n'.join(seg['text'] for seg in m['segments']),profiles,image_attached=image_attached)
+    diagnostic={'completed_at':record['created_at'],'kind':'user_reply','worldline':'main','provider_model':response_model,
+                'image_attached':image_attached,'message_ids':[record['id']],'replied_character_ids':[character.id],
+                'warnings':[{'character_id':character.id,'message_id':record['id'],'notes':notes}]}
+    with store.connection:
+        for key in ('ai-reply-diagnostic:main','ai-reply-diagnostic:main:'+character.id):
+            store.connection.execute('INSERT INTO settings VALUES(?,?)',(key,json.dumps(diagnostic)))
+        store.connection.execute('INSERT INTO settings VALUES(?,?)',('ai-reply-notes:main:'+str(record['id']),json.dumps(notes)))
+    return record
+
+
+def test_retained_legacy_shogo_check_survives_other_speaker_batch_and_ui_reopen(app,store):
     profiles=store.load_characters();native='この画面はチャット画面のログが見えますね。'
     value={'meaningful':False,'event_key':'','summary':'','important':False,'read_character_ids':[],
            'messages':[{'speaker_id':'shogo','recipient_ids':['user'],'reply_to_index':None,'reply_to_message_id':None,
                         'segments':[{'kind':'speech','text':native,'translation':'這畫面看得見聊天紀錄。'}]}]}
-    record=save_turn(store,'main',validate_turn(response(value),profiles,'user_reply'),profiles,'user_reply',image_attached=True)[0]
+    record=seed_legacy_voice_record(store,value,profiles,image_attached=True)
     check=store.reply_diagnostic('main','shogo')
     other=residents_turn(profiles);other['messages']=other['messages'][:1]
     save_turn(store,'main',other,profiles,'user_reply')
@@ -954,13 +972,13 @@ def test_shogo_check_survives_other_speaker_batch_and_ui_reopen(app,store):
     finally:window.close();app.processEvents();reopened.close()
 
 
-def test_screenshot_reply_mixups_are_advisory_not_rewritten_and_worldline_isolated(store):
+def test_retained_legacy_reply_advisories_are_not_rewritten_and_worldline_isolated(store):
     profiles=store.load_characters()
     original=[asdict(c) for c in profiles]
     native='はい、小鳥ちゃん、こちらの画面は確かに見えております。ご安心ください。'
     value={'meaningful':False,'event_key':'','summary':'','important':False,'read_character_ids':[],
            'messages':[{'speaker_id':'shogo','recipient_ids':['user'],'reply_to_index':None,'reply_to_message_id':None,'segments':[{'kind':'speech','text':native,'translation':'是的，小鳥ちゃん，我確實看見畫面。請放心。'}]}]}
-    records=save_turn(store,'main',validate_turn(response(value),profiles,'user_reply'),profiles,'user_reply',image_attached=False,response_model='provider-reported-model')
+    records=[seed_legacy_voice_record(store,value,profiles,image_attached=False,response_model='provider-reported-model')]
     diagnostic=store.reply_diagnostic('main')
     assert diagnostic['image_attached'] is False and diagnostic['provider_model']=='provider-reported-model'
     assert diagnostic['message_ids']==[records[0]['id']] and diagnostic['replied_character_ids']==['shogo']
@@ -978,7 +996,7 @@ def test_screenshot_reply_mixups_are_advisory_not_rewritten_and_worldline_isolat
     assert len(reply_quality_notes(reo,native,profiles,image_attached=False))==1
 
 
-def test_reply_advisory_keeps_enabled_modes_and_uses_one_request(app,store,monkeypatch):
+def test_new_voice_rejection_keeps_enabled_modes_and_uses_one_request(app,store,monkeypatch):
     from our_little_days import ai_ui
     from PySide6.QtWidgets import QDialog,QTabWidget
     window=MainWindow(UnsupportedBackend(),store.load_characters(),store)
@@ -995,6 +1013,7 @@ def test_reply_advisory_keeps_enabled_modes_and_uses_one_request(app,store,monke
             calls.append(payload)
             value=turn(); value['messages']=value['messages'][:1]
             value['messages'][0].update(speaker_id='shogo',recipient_ids=['user'],reply_to_index=None,reply_to_message_id=None)
+            value['messages'][0]['delivery']='observation_plain'
             value['messages'][0]['segments']=[{'kind':'speech','text':'はい、小鳥ちゃん、こちらの画面は確かに見えております。','translation':'是的，小鳥ちゃん，我確實看見畫面。'}]
             raw=response(value); raw['model']='gpt-4.1-mini-test-report'
             return raw
@@ -1003,7 +1022,9 @@ def test_reply_advisory_keeps_enabled_modes_and_uses_one_request(app,store,monke
         QTest.mouseClick(window.send_button,Qt.MouseButton.LeftButton)
         wait(lambda:c.worker is None)
         assert len(calls)==1 and c.enabled and c.autonomous and c.quiet_enabled
-        assert '回覆檢查提示' in c.last_note and '沒有自動重試' in c.last_note
+        assert '整批未寫入聊天' in c.last_note and '不自動重試' in c.last_note
+        assert store.api_result('main')['status']=='voice_rejected'
+        assert not any(r['speaker_id']=='shogo' and r['source_kind']=='ai' for r in store.messages())
         assert c.ledger.totals()['month']['requests']==3 and c.ledger.totals()['month']['uncertain_twd']==0
         assert store.reply_diagnostic('main')['image_attached'] is False
         window.character_combo.setCurrentIndex(11)

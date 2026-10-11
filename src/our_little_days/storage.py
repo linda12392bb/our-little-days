@@ -243,6 +243,21 @@ class SQLiteStore:
         row = self.connection.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
         return json.loads(row[0]) if row else {}
 
+    def record_voice_rejection(self, worldline, kind, notes, *, image_attached, provider_model, request_id):
+        """Local gate evidence; no rejected dialogue, screenshot or API key saved."""
+        value={'completed_at':taipei_now().isoformat(),'kind':kind,'worldline':worldline,
+            'provider_model':provider_model if isinstance(provider_model,str) and len(provider_model)<=256 else None,
+            'image_attached':image_attached,'message_ids':[],'replied_character_ids':[],
+            'rejected':True,'attempted_character_ids':['shogo'],
+            'warnings':[{'character_id':'shogo','message_id':None,'notes':list(notes)}]}
+        with self.connection:
+            for key in ('ai-reply-diagnostic:'+worldline,'ai-reply-diagnostic:'+worldline+':shogo'):
+                self.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,encode(value)))
+            result=self.api_result(worldline)
+            if result.get('request_id')==request_id:
+                result['status']='voice_rejected'
+                self.connection.execute('UPDATE settings SET value=? WHERE key=?',(encode(result),'ai-api-result:'+worldline))
+
     def message_reply_notes(self, worldline, message_id):
         row = self.connection.execute('SELECT value FROM settings WHERE key=?',
                                       (f'ai-reply-notes:{worldline}:{message_id}',)).fetchone()

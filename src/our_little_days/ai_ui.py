@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QF
     QFormLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QScrollArea, QWidget)
 
 from .ai_cost import AIConfig, AIError, QuietBudgetExhausted, UsageLedger
-from .ai_engine import ChangeGate, OutputLimitReached, PeerConversationError, build_payload, save_turn, validate_turn
+from .ai_engine import ChangeGate, OutputLimitReached, PeerConversationError, VoiceContractError, build_payload, save_turn, validate_turn
 from .ai_provider import WindowsKeyStore, request_api
 from .models import taipei_now
 
@@ -320,7 +320,11 @@ class AIController(QObject):
                 notes = list(dict.fromkeys(note for warning in diagnostic['warnings'] for note in warning['notes']))
                 self.last_note += ' · 回覆檢查提示：' + '；'.join(notes) + '。原回覆保留、費用已計入；沒有自動重試。'
         except Exception as exc:
-            if isinstance(exc,PeerConversationError):
+            if isinstance(exc,VoiceContractError):
+                self.window.store.record_voice_rejection(self.request_worldline,self.kind,exc.notes,
+                    image_attached=self.request_image_attached,provider_model=response.get('model'),request_id=self.request_id)
+                self.failure(str(exc),autonomous_only=True)
+            elif isinstance(exc,PeerConversationError):
                 self.failure(str(exc), autonomous_only=True)
             elif isinstance(exc,OutputLimitReached):
                 self.failure(f'{exc} 本次 API 回報輸出 {response["usage"]["completion_tokens"]}／設定上限 {self.request_config.max_output_tokens} tokens；輸入另計，不等於輸出超額。已暫停 AI；可免費查看「最近 API 結果」，不必調高上限。')
@@ -339,7 +343,8 @@ class AIController(QObject):
             elif self.kind=='screen_event':
                 self.autonomous=False
             self.failed_request=False
-            self.last_note=error+' 已暫停這項自主聊天；文字／語音回覆與記憶保留。'
+            stopped=' 已暫停這項自主聊天；' if self.kind in {'quiet_chat','quiet_test','screen_event'} else ' '
+            self.last_note=error+stopped+'文字／語音回覆與記憶保留；費用已計入。'
             self.refresh()
             self.test_failure(self.kind,self.last_note,self.request_id)
             return

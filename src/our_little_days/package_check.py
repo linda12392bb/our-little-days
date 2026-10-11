@@ -91,7 +91,7 @@ def _check_manual_buttons(window):
         usage = {'prompt_tokens':15759, 'completion_tokens':346} if kind == 'quiet_test' else {'prompt_tokens':15054, 'completion_tokens':161}
         if kind=='user_reply' and len(calls)==5:
             value['read_character_ids']=[]
-            value['messages'][0].update(speaker_id='shogo', segments=[{'kind':'speech','text':'はい、小鳥ちゃん、こちらの画面は確かに見えております。','translation':'是的，小鳥ちゃん，我確實看見畫面。'}])
+            value['messages'][0].update(speaker_id='shogo', delivery='observation_plain', segments=[{'kind':'speech','text':'はい、小鳥ちゃん、こちらの画面は確かに見えております。','translation':'是的，小鳥ちゃん，我確實看見畫面。'}])
         if kind=='user_reply' and len(calls)==6:
             value['read_character_ids']=[]
             value['messages']=[]
@@ -99,6 +99,8 @@ def _check_manual_buttons(window):
                 native='はい。' if character.language.startswith('ja') else 'Here.' if character.language=='en' else '在這裡。'
                 value['messages'].append({'speaker_id':character.id,'recipient_ids':['user' if i==0 else profiles[i-1].id],'reply_to_index':None,'reply_to_message_id':None,
                                           'segments':[{'kind':'speech','text':native,'translation':'在這裡。' if character.translation_required else ''}]})
+            for message in value['messages']:
+                if message['speaker_id']=='shogo':message['delivery']='everyday_plain'
             usage={'prompt_tokens':15054,'completion_tokens':1500}
         if kind=='user_reply' and len(calls)==7:
             return {'id':'offline-output-limit','model':'gpt-4.1-mini-offline-test','usage':{'prompt_tokens':15054,'completion_tokens':2000},
@@ -166,11 +168,14 @@ def _check_manual_buttons(window):
         while c.worker is not None and time.monotonic()<deadline:
             QTest.qWait(10)
         assert c.worker is None and len(calls)==5 and c.enabled and c.quiet_enabled
-        assert '回覆檢查提示' in c.last_note and '沒有自動重試' in c.last_note
+        assert '整批未寫入聊天' in c.last_note and '不自動重試' in c.last_note
+        assert window.store.api_result(window.worldline)['status']=='voice_rejected'
         diagnostic=window.store.reply_diagnostic(window.worldline)
         assert diagnostic['image_attached'] is False and diagnostic['provider_model']=='gpt-4.1-mini-offline-test'
-        assert len(diagnostic['warnings'][0]['notes'])==3
-        assert window.store.messages()[-1]['text'].startswith('はい、小鳥ちゃん')
+        assert len(diagnostic['warnings'][0]['notes'])==2
+        assert any('敬語句尾' in n for n in diagnostic['warnings'][0]['notes'])
+        assert window.store.messages()[-1]['speaker_id']=='user'
+        assert diagnostic['rejected'] and not diagnostic['message_ids']
         assert c.ledger.totals()['month']['uncertain_twd']==0
         from PySide6.QtWidgets import QDialog, QTabWidget
         window.character_combo.setCurrentIndex(11)
@@ -458,7 +463,7 @@ def check_package(speech_test_dir=None):
             checks.append('frozen send button replies immediately to pinned typed input while quiet mode remains ON; history-ID schema couples each ID with its true speaker, no network')
             checks.append('frozen persona viewer shows actual SQLite 月 address, soft plain Japanese/no keigo/僕 and prepared request diagnostic separately from retained original source; inspection makes no API call')
             checks.append('frozen roster uses latest user round: actual responder only, explicit Shogo read decision, others absent; exact adjacent translation repeats hidden without extra requests')
-            checks.append('frozen reply advisory detects Shogo mixed nickname/keigo and unattached-image claims; actual provider model/image status persisted and viewer free; reply retained, modes stay ON, one mock request without retry; latest input after full persona context')
+            checks.append('frozen reply voice gate blocks Shogo nickname/keigo batch before chat writes; settled usage, rejection/model/image diagnostics persist and viewer is free; text modes stay ON, one mock request without retry; existing chat preserved')
             checks.append('frozen 13 residents reply in one mock batch with all peer links; API output cap 2000 retained and participant-dependent schema lengths verified')
             checks.append('frozen length result settles 2000 reported output tokens, saves local metadata only, keeps incomplete batch out of chat and offers free API-result viewer; pauses without retry')
             continuity = store.conversation_state('main')
