@@ -37,6 +37,7 @@ def _check_manual_buttons(window):
     saved = (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
              c.keys.read, c.keys.exists, c.config)
     calls, warnings, successes = [], [], []
+    profiles=window.store.load_characters()
     def fake(key, payload, cancelled):
         calls.append(payload)
         context = json.loads(payload['messages'][1]['content'][0]['text'])
@@ -46,6 +47,9 @@ def _check_manual_buttons(window):
         assert focus['task']==kind and focus['visual_evidence']==context['visual_evidence']
         assert '常体を使い、丁寧語・敬語で話さない' in payload['messages'][2]['content']
         schema = payload['response_format']['json_schema']['schema']['properties']['messages']
+        if 'anyOf' in schema:
+            assert schema['anyOf'][-1]['maxItems']==13
+            schema=schema['anyOf'][0]
         item = schema['items']
         variants = item.get('anyOf', [item])
         assert all(variant['properties']['reply_to_index'] == {'type':'null'} for variant in variants)
@@ -84,6 +88,17 @@ def _check_manual_buttons(window):
         if kind=='user_reply' and len(calls)==5:
             value['read_character_ids']=[]
             value['messages'][0].update(speaker_id='shogo', segments=[{'kind':'speech','text':'はい、小鳥ちゃん、こちらの画面は確かに見えております。','translation':'是的，小鳥ちゃん，我確實看見畫面。'}])
+        if kind=='user_reply' and len(calls)==6:
+            value['read_character_ids']=[]
+            value['messages']=[]
+            for i,character in enumerate(profiles):
+                native='はい。' if character.language.startswith('ja') else 'Here.' if character.language=='en' else '在這裡。'
+                value['messages'].append({'speaker_id':character.id,'recipient_ids':['user' if i==0 else profiles[i-1].id],'reply_to_index':None,'reply_to_message_id':None,
+                                          'segments':[{'kind':'speech','text':native,'translation':'在這裡。' if character.translation_required else ''}]})
+            usage={'prompt_tokens':15054,'completion_tokens':1500}
+        if kind=='user_reply' and len(calls)==7:
+            return {'id':'offline-output-limit','model':'gpt-4.1-mini-offline-test','usage':{'prompt_tokens':15054,'completion_tokens':2000},
+                    'choices':[{'finish_reason':'length','message':{'content':'{"messages":[{"speaker_id":"shogo","segments":[{"kind":"speech","text":"未完成'}}]}
         return {'id':'offline-test-only', 'model':'gpt-4.1-mini-offline-test', 'usage':usage,
                 'choices':[{'finish_reason':'stop', 'message':{'content':json.dumps(value)}}]}
     try:
@@ -174,6 +189,34 @@ def _check_manual_buttons(window):
             assert viewed and len(calls) == 5
         finally:
             QDialog.exec = original_exec
+        window.chat_input.setPlainText('晚安')
+        QTest.mouseClick(window.send_button, Qt.MouseButton.LeftButton)
+        deadline=time.monotonic()+10
+        while c.worker is not None and time.monotonic()<deadline:QTest.qWait(10)
+        assert c.worker is None and len(calls)==6
+        residents=window.store.messages()[-13:]
+        assert len({r['speaker_id'] for r in residents})==13
+        assert all(residents[i]['reply_to']==residents[i-1]['id'] for i in range(1,13))
+        assert window.store.api_result(window.worldline)['completion_tokens']==1500
+        before_limit=window.store.messages()
+        window.chat_input.setPlainText('晚安')
+        QTest.mouseClick(window.send_button, Qt.MouseButton.LeftButton)
+        deadline=time.monotonic()+10
+        while c.worker is not None and time.monotonic()<deadline:QTest.qWait(10)
+        assert c.worker is None and len(calls)==7 and not c.enabled
+        assert len(window.store.messages())==len(before_limit)+1 and window.store.messages()[-1]['speaker_id']=='user'
+        assert '輸出 2000／設定上限 2000 tokens' in c.last_note
+        evidence=window.store.api_result(window.worldline)
+        assert evidence['status']=='output_limit' and evidence['finish_reason']=='length' and evidence['completion_tokens']==2000
+        assert not evidence['content_json_complete'] and c.ledger.totals()['month']['uncertain_twd']==0
+        def inspect_limit(dialog):
+            tabs=dialog.findChild(QTabWidget)
+            assert tabs.tabText(7)=='最近 API 結果'
+            assert '回報輸出：2000 tokens' in tabs.widget(7).toPlainText()
+            return QDialog.DialogCode.Accepted
+        try:
+            QDialog.exec=inspect_limit;window.inspect_character();assert len(calls)==7
+        finally:QDialog.exec=original_exec
     finally:
         (ai_ui.request_api, QMessageBox.warning, QMessageBox.information,
          c.keys.read, c.keys.exists, c.config) = saved
@@ -301,6 +344,8 @@ def check_package(speech_test_dir=None):
             checks.append('frozen persona viewer shows actual SQLite 月 address, soft plain Japanese/no keigo/僕 and prepared request diagnostic separately from retained original source; inspection makes no API call')
             checks.append('frozen roster uses latest user round: actual responder only, explicit Shogo read decision, others absent; exact adjacent translation repeats hidden without extra requests')
             checks.append('frozen reply advisory detects Shogo mixed nickname/keigo and unattached-image claims; actual provider model/image status persisted and viewer free; reply retained, modes stay ON, one mock request without retry; latest input after full persona context')
+            checks.append('frozen 13 residents reply in one mock batch with all peer links; API output cap 2000 retained and participant-dependent schema lengths verified')
+            checks.append('frozen length result settles 2000 reported output tokens, saves local metadata only, keeps incomplete batch out of chat and offers free API-result viewer; pauses without retry')
             continuity = store.conversation_state('main')
             messages = store.messages()
             checks.append('quiet chat defaults OFF; 3-minute local check, 2000 shared output cap, NT$10 daily cap and persistent cross-batch peer replies verified with synthetic data, no API')

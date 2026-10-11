@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "our-little-days"
-version = "0.4.7"
+version = "0.4.8"
 description = "月色不打烊 — Windows 十三聲道陪伴室，Automatic voice input 最小試用版"
 requires-python = ">=3.11,<3.14"
 dependencies = ["PySide6==6.10.2", "webrtcvad-wheels==2.0.14.post1", "opencc-python-reimplemented==0.1.7"]

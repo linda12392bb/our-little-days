@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QF
     QFormLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QScrollArea, QWidget)
 
 from .ai_cost import AIConfig, AIError, QuietBudgetExhausted, UsageLedger
-from .ai_engine import ChangeGate, build_payload, save_turn, validate_turn
+from .ai_engine import ChangeGate, OutputLimitReached, build_payload, save_turn, validate_turn
 from .ai_provider import WindowsKeyStore, request_api
 from .models import taipei_now
 
@@ -295,6 +295,7 @@ class AIController(QObject):
             return
         try:
             actual = self.ledger.settle(self.request_id, response.get('usage'), response.get('id'))
+            self.window.store.record_api_result(self.request_worldline,self.kind,self.request_id,response,self.request_config.max_output_tokens,actual)
             if self.request_generation != self.generation:
                 self.last_note = f'已取消顯示 · 已回報估算費用 NT${actual:.4f}'
                 return
@@ -302,6 +303,7 @@ class AIController(QObject):
             if self.window.worldline != self.request_worldline:
                 raise AIError('世界線已變更，忽略過時 AI 結果。')
             records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id, quiet_cooldown=self.request_config.quiet_interval_minutes, image_attached=self.request_image_attached, response_model=response.get('model'))
+            self.window.store.accept_api_result(self.request_worldline,self.request_id)
             for record in records:
                 self.window.render_message(record)
             if self.request_roster is not None and self.window.transient_roster is self.request_roster:
@@ -318,7 +320,10 @@ class AIController(QObject):
                 notes = list(dict.fromkeys(note for warning in diagnostic['warnings'] for note in warning['notes']))
                 self.last_note += ' · 回覆檢查提示：' + '；'.join(notes) + '。原回覆保留、費用已計入；沒有自動重試。'
         except Exception as exc:
-            self.failure(str(exc) if isinstance(exc, AIError) else 'AI 結果儲存失敗，已停止 AI；保留用量與既有資料。')
+            if isinstance(exc,OutputLimitReached):
+                self.failure(f'{exc} 本次 API 回報輸出 {response["usage"]["completion_tokens"]}／設定上限 {self.request_config.max_output_tokens} tokens；輸入另計，不等於輸出超額。已暫停 AI；可免費查看「最近 API 結果」，不必調高上限。')
+            else:
+                self.failure(str(exc) if isinstance(exc, AIError) else 'AI 結果儲存失敗，已停止 AI；保留用量與既有資料。')
         finally:
             self.refresh()
 

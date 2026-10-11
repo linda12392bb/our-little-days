@@ -1,5 +1,17 @@
 # Windows 試用包交付與驗證
 
+## 十三位同批共用 2000 與輸出截斷診斷 0.4.8
+
+- 下載：[Windows 自主陪伴 0.4.8](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.8-preview.zip)，私人 GitHub 檔案頁按 View raw；原十三個 ZIP 保留。
+- 大小：59,136,107 bytes；SHA-256：`7c1261f06a3a665e59c12a3602d78906696561a97baf1c67bef883cbbdab27ea`；EXE SHA-256：`e6e3a509cdf7c5a07ff1f6ff05fe310c2051afda55f3ddcf431da36d64cca5d8`。
+- 使用者 0.4.7 截圖為輸出 length 截斷，並補充此前回覆均不到 1000。不能認定 2000 不足或從未保存的原始失敗內容推測根因。已確認舊 schema 允許 4 則 × 8 段 × 母語 2000／翻譯 3000 字元，篇幅遠超整批 cap，這是生成規劃缺口，不是完整人格輸入漏失或擅自增加 max output。
+- 最新明確要求：最多十三位同批，仍一次 API、共用 2000，不限制三位也不要求全員每次說話。以互斥訊息數範圍安排長度：1–3 則／兩段／64 原文與 80 翻譯字元，4–7 則／一段／32 與 40，8–13 則／一段／16 與 20。少人可留敘事，多人短接話；完整十三份人格及原始後台、母語與翻譯不刪改。字元 envelope 不等於精確 token 保證，正式模型仍可能截斷。其他較低輸出設定採更小批次，預設最大 2000 不提高。
+- 圖片摘要／事件 key 限長；文字／測試回覆不用的事件欄位固定空。不拆十三次請求、不續寫、不自動重試、不以價格為由抹除人格。實際請求仍 max_completion_tokens=2000，所有輸入／輸出與既有用量共用月 NT$500／自訂日額，不付款加值。
+- 成功／截斷的真實 API 回報模型、tokens、finish_reason、設定 cap、估算費用及有限完整 JSON／字元／空白／text 欄位重複計數，保存在世界線隔離 SQLite settings。最近 API 結果頁免費查看，重開／備份保留；不保存原始回應副本、聊天全文、圖片或 Key。計數不獨自證明異常原因；舊版資料不回溯補寫。
+- 截斷時成本照報回用量結算、提示輸出／設定 cap，AI 停止且不重試、不將半套訊息／已讀寫進聊天。已有聊天、世界線、人格、長期記憶及跨批接話保留。十三角色檔與 0.4.7 逐位元組相同。長歷史 schema 共用 resident_id／segment_kind 的 $defs，不跨三個篇幅範圍反覆列相同 enum；101 則合成歷史下共 454 enum 值，小於保守 500 上限，獨立驗證器解析參照並驗證十三位回覆。成本測試標記、Key、離線模型、月日額與冷卻沿用，升級不要求付費重測或調高輸出。
+- **188 passed、2 Windows-only skipped**；人格稽核、Qt smoke、依賴與本機封裝檢查通過。獨立 jsonschema Draft202012Validator 的 58 項檢查確認 1–13 則有效、14 則無效、多人成員長篇無效、少人較長與空回覆任務分別有效。新實際 UI 模擬檢查輸出 2000 的 length 成本結算、既有消息／記憶不動、當次一次呼叫與免費診斷重開隔離；13 位單批完整接話鏈持久保存。
+- Linux + Wine 真正 Windows frozen EXE 的 23 項封裝檢查通過：13 位模擬同批與接話、length／2000 成本與免費失敗診斷、原個性提示／roster／圖片容量／DPAPI／SQLite／官方二進位／公開 tiny 語音。**未呼叫正式付費 API；原生 Windows 0.4.8 與模型生成完整度／口吻品質未測，不宣稱永不截斷。**
+
 ## 聖護生成語體、本輪輸入與回覆診斷 0.4.7
 
 - 下載：[Windows 自主陪伴 0.4.7](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.7-preview.zip)，私人 GitHub 檔案頁按 View raw；原十二個 ZIP 保留。

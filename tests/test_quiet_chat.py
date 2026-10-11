@@ -269,7 +269,7 @@ def result(value):
 def test_group_schema_never_asks_model_for_same_batch_indexes(store, kind, app):
     image = QImage(64, 64, QImage.Format.Format_RGB32) if kind == 'screen_event' else None
     payload, _ = build_payload(AIConfig(), store.load_characters(), store, 'main', kind, image=image)
-    fields = payload['response_format']['json_schema']['schema']['properties']['messages']['items']['properties']
+    fields = payload['response_format']['json_schema']['schema']['properties']['messages']['anyOf'][0]['items']['properties']
     assert fields['reply_to_index'] == {'type': 'null'}
     assert 'reply_to_index 固定 null' in payload['messages'][0]['content']
 

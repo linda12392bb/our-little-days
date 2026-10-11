@@ -1,8 +1,8 @@
 # ☾ 月色不打烊｜公寓還是一樣很吵
 
-OUR LITTLE DAYS · Windows 本機十三聲道陪伴室 · 自主陪伴試用版 0.4.7
+OUR LITTLE DAYS · Windows 本機十三聲道陪伴室 · 自主陪伴試用版 0.4.8
 
-[下載 Windows 試用包](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.7-preview.zip)：在 GitHub 檔案頁按 **View raw**。全部解壓後雙擊 OurLittleDays.exe，保留 _internal 與 speech-runtime；不需 Python、原始碼、指令或雲端網站。
+[下載 Windows 試用包](https://github.com/linda12392bb/our-little-days/blob/main/downloads/OurLittleDays-Windows-x64-Companion-0.4.8-preview.zip)：在 GitHub 檔案頁按 **View raw**。全部解壓後雙擊 OurLittleDays.exe，保留 _internal 與 speech-runtime；不需 Python、原始碼、指令或雲端網站。
 
 [自動語音輸入與測試](docs/VOICE_INPUT.md) · [新手啟動與 API 設定](docs/WINDOWS_USER_GUIDE.md) · [Windows 實測清單](docs/WINDOWS_TEST_CHECKLIST.md) · [Phase 2/3 設計與費用界線](docs/PHASE2_3.md)
 
@@ -20,7 +20,7 @@ OUR LITTLE DAYS · Windows 本機十三聲道陪伴室 · 自主陪伴試用版 
 - 預設 gpt-4.1-mini 圖片理解；Windows DPAPI 金鑰加密，本機明確啟用後才付費。
 - NT$500 月預算、集中預留／結算、每日／每月用量、剩餘預算與待確認費用。估算與平台實際帳單分開。
 - 六秒擷取不等於 API 排程；明顯且穩定的新畫面才分析，最短 120 秒間隔，只是限速。靜態畫面可一直安靜。
-- 每次完整十三份原始人格進入同一請求，0–4 人自然回應，支援彼此接話與 SQLite 回覆關聯。
+- 每次完整十三份原始人格進入同一請求，同批最多十三位自然參與，整批共用 2000 輸出 tokens，支援彼此接話與 SQLite 回覆關聯。
 - 外語發言／敘事逐段附繁中翻譯；世界線隔離、事件持久化，不擅改人格、未知欄位或戀愛關係。
 - 必須先完成單次畫面／單次角色的真實用量測試，才能手動啟用文字 AI 與自主陪伴。
 - 關閉／暫停／異常恢復、完整聊天備份與用量合併還原。沒有付費自動摘要或自動重試。
@@ -51,7 +51,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/smoke_ui.py
 
 已有的雲端環境僅用於開發／測試，不是產品部署。使用隔離工作目錄，不需建立新 worktree。原生擷取與 DPAPI 測試需 Windows；模擬 API 測試不證明真正模型品質。
 
-Windows 打包：開發者雙擊「製作Windows執行檔.cmd」，或在 Windows x64 Python 跑 scripts/build_windows.py。產物：artifacts/OurLittleDays-Windows-x64-Companion-0.4.7-preview.zip。
+Windows 打包：開發者雙擊「製作Windows執行檔.cmd」，或在 Windows x64 Python 跑 scripts/build_windows.py。產物：artifacts/OurLittleDays-Windows-x64-Companion-0.4.8-preview.zip。
 
 正式原始角色與稽核：[角色匯入](docs/CHARACTER_IMPORT.md)、[完整性修復](docs/CHARACTER_REPAIR_CHECK.md)、[已確認補充](docs/CHARACTER_UPDATES.md)。十三 source_text 保留，種子只初始化；唯一已授權資料補充是序調戲／♡，合併前備份。SQLite 設計：[PERSISTENCE.md](docs/PERSISTENCE.md)。
 

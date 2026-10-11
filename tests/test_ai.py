@@ -254,7 +254,7 @@ def test_request_schema_constrains_selected_character_and_real_reply_ids(store):
     foreign = store.append_message(speaker_id='user', speaker_name='月鹿', text='其他世界線', worldline='glasshouse')
     test = store.append_message(speaker_id='order', speaker_name='序', text='介面測試', source_kind='test')
     payload, _ = build_payload(AIConfig(), characters, store, 'main', 'quiet_chat')
-    variants = payload['response_format']['json_schema']['schema']['properties']['messages']['items']['anyOf']
+    variants = payload['response_format']['json_schema']['schema']['properties']['messages']['anyOf'][0]['items']['anyOf']
     fields = variants[0]['properties']
     historical = variants[1]['properties']
     assert set(fields['speaker_id']['enum']) == {c.id for c in characters}
@@ -550,8 +550,8 @@ def test_user_reply_schema_uses_local_references_and_requires_a_reply(store):
         current = {'kind':input_kind, 'text':'晚安', 'saved':False}
         payload, _ = build_payload(AIConfig(), profiles, store, 'main', 'user_reply', current_input=current)
         schema = payload['response_format']['json_schema']['schema']['properties']['messages']
-        assert schema['minItems'] == 1
-        fields = schema['items']['properties']
+        assert schema['anyOf'][0]['minItems'] == 1
+        fields = schema['anyOf'][0]['items']['properties']
         assert fields['reply_to_index'] == fields['reply_to_message_id'] == {'type':'null'}
         context = json.loads(payload['messages'][1]['content'][0]['text'])
         assert context['current_user_input'] == current and len(context['characters']) == 13
@@ -567,7 +567,7 @@ def test_historical_reference_schema_couples_ids_to_actual_speakers(store):
     b = store.append_message(speaker_id='order', speaker_name='序', text='ほんま♡')
     foreign = store.append_message(speaker_id='light', speaker_name='光', text='AU', worldline='glasshouse')
     payload, _ = build_payload(AIConfig(), profiles, store, 'main', 'quiet_chat')
-    branches = payload['response_format']['json_schema']['schema']['properties']['messages']['items']['anyOf']
+    branches = payload['response_format']['json_schema']['schema']['properties']['messages']['anyOf'][0]['items']['anyOf']
     pairs = {}
     for branch in branches[1:]:
         fields = branch['properties']
@@ -729,6 +729,133 @@ def test_current_input_is_last_message_without_losing_history_or_all_voices(stor
     assert json.loads(payload['messages'][-1]['content'])['current_user_input']['text']=='舊輸入'
     payload,_=build_payload(AIConfig(),store.load_characters(),store,'main','quiet_chat')
     assert json.loads(payload['messages'][-1]['content'])['current_user_input'] is None
+
+
+def residents_turn(profiles):
+    messages=[]
+    for i,c in enumerate(profiles):
+        native='はい。' if c.language.startswith('ja') else 'Here.' if c.language=='en' else '在這裡。'
+        messages.append({'speaker_id':c.id,'recipient_ids':['user' if i==0 else profiles[i-1].id],
+                         'reply_to_index':None,'reply_to_message_id':None,
+                         'segments':[{'kind':'speech','text':native,'translation':'在這裡。' if c.translation_required else ''}]})
+    return {'meaningful':False,'event_key':'','summary':'','important':False,'read_character_ids':[],'messages':messages}
+
+
+@pytest.mark.parametrize('kind',['user_reply','quiet_chat','screen_event'])
+def test_output_envelope_allows_thirteen_with_shorter_many_speaker_branches(store,app,kind):
+    profiles=store.load_characters();before=[asdict(c) for c in profiles]
+    payload,_=build_payload(AIConfig(),profiles,store,'main',kind,image=image() if kind=='screen_event' else None)
+    arrays=payload['response_format']['json_schema']['schema']['properties']['messages']['anyOf']
+    assert [b['maxItems'] for b in arrays]==[3,7,13]
+    assert [b['minItems'] for b in arrays]==[1 if kind=='user_reply' else 0,4,8]
+    caps=[]
+    for b in arrays:
+        variants=b['items'].get('anyOf',[b['items']])
+        for item in variants:
+            fields=item['properties']
+            assert fields['speaker_id']['enum']==[c.id for c in profiles]
+            assert fields['reply_to_index']=={'type':'null'}
+        seg=variants[0]['properties']['segments']
+        caps.append((seg['maxItems'],seg['items']['properties']['text']['maxLength'],seg['items']['properties']['translation']['maxLength']))
+    assert caps==[(2,64,80),(1,32,40),(1,16,20)]
+    assert payload['max_completion_tokens']==2000
+    assert json.loads(payload['messages'][-1]['content'])['output_plan']['max_messages']==13
+    assert json.loads(payload['messages'][1]['content'][0]['text'])['characters']==json.loads(json.dumps(before))
+    assert [asdict(c) for c in store.load_characters()]==before
+
+
+def test_thirteen_speakers_share_one_reply_batch_and_preserve_all_peer_links(store):
+    profiles=store.load_characters()
+    user=store.append_message(speaker_id='user',speaker_name='月鹿',text='大家在嗎')
+    value=residents_turn(profiles)
+    raw=response(value);raw['usage']['completion_tokens']=1500
+    parsed=validate_turn(raw,profiles,'user_reply',store=store)
+    rows=save_turn(store,'main',parsed,profiles,'user_reply',user['id'],image_attached=False)
+    assert len(rows)==13 and len({r['speaker_id'] for r in rows})==13
+    assert rows[0]['reply_to']==user['id']
+    assert all(rows[i]['reply_to']==rows[i-1]['id'] for i in range(1,13))
+    assert len(store.roster_status()['replied'])==13
+    assert len(store.load_characters())==13
+    value['messages'].append(value['messages'][0])
+    with pytest.raises(AIError,match='訊息數量'):
+        validate_turn(response(value),profiles,'user_reply')
+
+
+def test_large_peer_history_reuses_resident_enum_under_provider_schema_limit(store):
+    profiles=store.load_characters();anchors=[]
+    for i in range(100):
+        c=profiles[i%13]
+        row=store.append_message(speaker_id=c.id,speaker_name=c.name,text='本機格式計數測試',source_kind='ai')
+        if i<40:anchors.append(row['id'])
+    store.append_message(speaker_id='user',speaker_name='月鹿',text='大家在嗎')
+    with store.connection:
+        store.connection.execute('INSERT INTO settings VALUES(?,?)',('conversation:main',json.dumps({'anchor_ids':anchors})))
+    payload,_=build_payload(AIConfig(),profiles,store,'main','quiet_chat')
+    schema=payload['response_format']['json_schema']['schema']
+    def enum_count(value):
+        if isinstance(value,dict):return len(value.get('enum',[]))+sum(enum_count(v) for key,v in value.items() if key!='enum')
+        if isinstance(value,list):return sum(map(enum_count,value))
+        return 0
+    assert enum_count(schema)<=500  # Conservative bound across supported models.
+    assert schema['$defs']['resident_id']['enum']==[c.id for c in profiles]
+    for array in schema['properties']['messages']['anyOf']:
+        for historic in array['items']['anyOf'][1:]:
+            assert historic['properties']['speaker_id']=={'$ref':'#/$defs/resident_id'}
+    assert len(store.messages())==101
+
+
+def test_output_limit_uses_reported_usage_and_keeps_failure_metrics_without_raw_chat(app,store,monkeypatch):
+    from our_little_days import ai_ui
+    from our_little_days.storage import SQLiteStore
+    from PySide6.QtWidgets import QDialog,QTabWidget
+    window=MainWindow(UnsupportedBackend(),store.load_characters(),store)
+    try:
+        setup_fake(window,monkeypatch);c=window.ai
+        for kind in ('screen_test','reply_test'):
+            rid,_=c.ledger.reserve(c.config,kind,100);c.ledger.settle(rid,{'prompt_tokens':10,'completion_tokens':10},'offline');c.ledger.mark_test(c.config,kind,rid)
+        c.enable(True);c.quiet_enabled=True;c.refresh()
+        before=[asdict(p) for p in store.load_characters()]
+        profiles=store.load_characters()
+        previous_messages=store.messages()
+        store.add_memory('不能刪除的記憶',character_id='shogo')
+        calls=[]
+        def fake(key,payload,cancelled):
+            calls.append(payload)
+            raw=response(residents_turn(profiles))
+            raw['model']='gpt-4.1-mini-test-report';raw['usage']={'prompt_tokens':16000,'completion_tokens':2000}
+            raw['choices'][0]['finish_reason']='length'
+            raw['choices'][0]['message']['content']='{"messages":[{"speaker_id":"shogo","segments":[{"kind":"speech","text":"診斷秘密詞"},{"kind":"speech","text":"診斷秘密詞"},{"kind":"speech","text":"未完成'
+            return raw
+        monkeypatch.setattr(ai_ui,'request_api',fake)
+        window.chat_input.setPlainText('這個畫面呢')
+        QTest.mouseClick(window.send_button,Qt.MouseButton.LeftButton)
+        wait(lambda:c.worker is None)
+        assert len(calls)==1 and '輸出 2000／設定上限 2000 tokens' in c.last_note
+        assert not c.enabled and not c.quiet_enabled  # Preserve explicit pause, no background paid retry.
+        assert len(store.messages())==len(previous_messages)+1 and store.messages()[-1]['speaker_id']=='user'
+        assert store.messages()[:-1]==previous_messages
+        assert c.ledger.totals()['month']['output_tokens']==2020 and c.ledger.totals()['month']['uncertain_twd']==0
+        result=store.api_result('main')
+        assert result['finish_reason']=='length' and result['completion_tokens']==2000 and result['prompt_tokens']==16000
+        assert result['configured_output_limit']==2000 and not result['content_json_complete'] and result['status']=='output_limit'
+        assert result['complete_text_field_count']==2 and result['repeated_complete_text_fields']==1
+        assert result['message_field_occurrences']==1 and result['segment_field_occurrences']==3
+        assert '診斷秘密詞' not in json.dumps(result) and 'mock-key-only' not in json.dumps(result)
+        assert [asdict(p) for p in store.load_characters()]==before and store.memories()[0]['content']=='不能刪除的記憶'
+        assert not store.api_result('glasshouse')
+        viewed=[]
+        def inspect(dialog):
+            tabs=dialog.findChild(QTabWidget)
+            assert tabs.tabText(7)=='最近 API 結果'
+            text=tabs.widget(7).toPlainText()
+            assert '回報輸出：2000 tokens' in text and '輸出上限：2000 tokens' in text and '截斷' in text
+            viewed.append(True);return QDialog.DialogCode.Accepted
+        monkeypatch.setattr(QDialog,'exec',inspect);window.inspect_character()
+        assert viewed and len(calls)==1
+        reopened=SQLiteStore(store.path)
+        try:assert reopened.api_result('main')==result
+        finally:reopened.close()
+    finally:window.close();app.processEvents()
 
 
 @pytest.mark.parametrize('text', ['月、僕はここにいるよ。', 'REOは「はい、小鳥ちゃん、ご安心ください」と言った。', '画面は見えていない。', '画面が見えてるとは言えない。', '君の気持ちが見えてる。', '僕は本をずっと読んでる。'])

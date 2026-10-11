@@ -221,6 +221,51 @@ class SQLiteStore:
         row = self.connection.execute('SELECT value FROM settings WHERE key=?', ('ai-reply-diagnostic:'+worldline,)).fetchone()
         return json.loads(row[0]) if row else {}
 
+    def record_api_result(self, worldline, kind, request_id, response, output_limit, estimated_twd):
+        """Keep failure evidence locally without raw response, chat, images or keys."""
+        import re
+        choice=response['choices'][0] if response.get('choices') else {}
+        content=(choice.get('message') or {}).get('content') or ''
+        if not isinstance(content,str):
+            content=''
+        try:
+            json.loads(content)
+            complete=True
+        except (ValueError,TypeError):
+            complete=False
+        texts=[]
+        for match in re.finditer(r'[,{]\s*"text"\s*:\s*',content):
+            try:
+                value,_=json.JSONDecoder().raw_decode(content[match.end():])
+                if isinstance(value,str):texts.append(value)
+            except ValueError:
+                pass
+        model=response.get('model')
+        result={'received_at':taipei_now().isoformat(),'worldline':worldline,'kind':kind,'request_id':request_id,
+                'provider_model':model if isinstance(model,str) and len(model)<=256 else None,
+                'finish_reason':choice.get('finish_reason'), 'configured_output_limit':output_limit,
+                'prompt_tokens':response['usage']['prompt_tokens'],'completion_tokens':response['usage']['completion_tokens'],
+                'estimated_twd':estimated_twd,'content_json_complete':complete,'generated_characters':len(content),
+                'whitespace_characters':sum(c.isspace() for c in content),
+                'message_field_occurrences':len(re.findall(r'"speaker_id"\s*:',content)),
+                'segment_field_occurrences':len(re.findall(r'"kind"\s*:\s*"(?:speech|narration)"',content)),
+                'complete_text_field_count':len(texts),'repeated_complete_text_fields':len(texts)-len(set(texts)),
+                'status':'output_limit' if choice.get('finish_reason')=='length' else 'validation_pending'}
+        with self.connection:
+            self.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
+                                    ('ai-api-result:'+worldline,encode(result)))
+
+    def api_result(self, worldline):
+        row=self.connection.execute('SELECT value FROM settings WHERE key=?',('ai-api-result:'+worldline,)).fetchone()
+        return json.loads(row[0]) if row else {}
+
+    def accept_api_result(self, worldline, request_id):
+        result=self.api_result(worldline)
+        if result.get('request_id')==request_id:
+            result['status']='accepted'
+            with self.connection:
+                self.connection.execute('UPDATE settings SET value=? WHERE key=?',(encode(result),'ai-api-result:'+worldline))
+
     def set_relationship(self, character_id, worldline, relation, *, confirmed=False):
         if not confirmed:
             raise StorageError("修改角色關係需要使用者確認。")
