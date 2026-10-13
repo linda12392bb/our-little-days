@@ -264,7 +264,7 @@ def test_request_schema_constrains_selected_character_and_real_reply_ids(store):
     fields = variants[0]['properties']
     historical = next(v['properties'] for v in variants if v['properties']['reply_to_message_id']!={'type':'null'})
     previous_ids = resolved(root,historical['reply_to_message_id'])['enum']
-    assert set(resolved(root,fields['speaker_id'])['enum']) == {c.id for c in characters if c.id!='shogo'}
+    assert set(resolved(root,fields['speaker_id'])['enum']) == {c.id for c in characters if c.id not in {'shogo','haru'}}
     assert fields['reply_to_message_id'] == {'type':'null'}
     assert previous_ids == [peer['id']]
     assert historical['recipient_ids']['items']['enum'] == ['order']
@@ -751,6 +751,7 @@ def residents_turn(profiles):
                          'segments':[{'kind':'speech','text':native,'translation':'在這裡。' if c.translation_required else ''}]})
     for message in messages:
         if message['speaker_id']=='shogo':message['delivery']='everyday_plain'
+        if message['speaker_id']=='haru':message['dialect']='standard_japanese'
     return {'meaningful':False,'event_key':'','summary':'','important':False,'read_character_ids':[],'messages':messages}
 
 
@@ -819,7 +820,7 @@ def test_large_peer_history_reuses_resident_enum_under_provider_schema_limit(sto
     assert schema['$defs']['resident_id']['enum']==[c.id for c in profiles]
     for array in schema['properties']['messages']['anyOf']:
         for historic in array['items']['anyOf']:
-            assert historic['properties']['speaker_id'] in ({'$ref':'#/$defs/other_resident_id'},{'type':'string','enum':['shogo']})
+            assert historic['properties']['speaker_id'] in ({'$ref':'#/$defs/other_resident_id'},{'type':'string','enum':['shogo']},{'type':'string','enum':['haru']})
             ref=historic['properties']['reply_to_message_id']
             if '$ref' in ref:
                 assert resolved(schema,ref)['enum']

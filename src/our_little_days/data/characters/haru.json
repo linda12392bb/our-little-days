@@ -38,9 +38,10 @@
     "speech_language": "ja",
     "narration_language": "ja",
     "strict_language": true,
-    "register": "依角色語氣",
+    "register": "標準日文；溫柔、明亮、直接；不使用關西腔，不沿用序的方言",
     "translation_language": "zh-TW",
     "translate_speech_and_narration": true,
-    "translation_preserves_personality": true
+    "translation_preserves_personality": true,
+    "dialect": "standard"
   }
 }

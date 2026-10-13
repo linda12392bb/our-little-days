@@ -14,6 +14,7 @@ from .ai_cost import AIConfig, AIError, QuietBudgetExhausted, UsageLedger
 from .ai_engine import ChangeGate, OutputLimitReached, PeerConversationError, VoiceContractError, build_payload, save_turn, validate_turn
 from .ai_provider import WindowsKeyStore, request_api
 from .models import taipei_now
+from .works import WorkIdentityError
 
 
 class AITask(QThread):
@@ -252,6 +253,9 @@ class AIController(QObject):
             if image is None and kind == 'screen_test':
                 image = self.window.frame_image
             payload, upper = build_payload(self.config, characters, self.window.store, worldline, kind, image, selected, current_input)
+            named_work=json.loads(payload['messages'][1]['content'][0]['text'])['work_context']
+            if named_work and named_work['scope']=='current_user_named_work' and named_work['persist_allowed']:
+                self.window.store.remember_named_work(worldline,named_work['work'],named_work['matched_alias'],user_message_id if user_message_id!='latest' else None)
             self.window.store.record_persona_preparation(characters, worldline, kind, self.config.model)
             request_id, reserve = self.ledger.reserve(self.config, kind, upper)
         except QuietBudgetExhausted as exc:
@@ -273,6 +277,7 @@ class AIController(QObject):
         self.request_id = request_id
         self.kind, self.selected = kind, selected
         self.request_characters, self.request_worldline = characters, worldline
+        self.request_work_context = named_work
         self.request_config = self.config
         self.request_image_attached = any(part.get('type') == 'image_url' for message in payload['messages'] if isinstance(message['content'], list) for part in message['content'])
         self.request_generation = self.generation
@@ -302,7 +307,7 @@ class AIController(QObject):
             turn = validate_turn(response, self.request_characters, self.kind, self.selected, self.window.store, self.request_worldline)
             if self.window.worldline != self.request_worldline:
                 raise AIError('世界線已變更，忽略過時 AI 結果。')
-            records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id, quiet_cooldown=self.request_config.quiet_interval_minutes, image_attached=self.request_image_attached, response_model=response.get('model'))
+            records = save_turn(self.window.store, self.request_worldline, turn, self.request_characters, self.kind, self.user_message_id, quiet_cooldown=self.request_config.quiet_interval_minutes, image_attached=self.request_image_attached, response_model=response.get('model'),named_work=self.request_work_context)
             self.window.store.accept_api_result(self.request_worldline,self.request_id)
             for record in records:
                 self.window.render_message(record)
@@ -320,9 +325,12 @@ class AIController(QObject):
                 notes = list(dict.fromkeys(note for warning in diagnostic['warnings'] for note in warning['notes']))
                 self.last_note += ' · 回覆檢查提示：' + '；'.join(notes) + '。原回覆保留、費用已計入；沒有自動重試。'
         except Exception as exc:
-            if isinstance(exc,VoiceContractError):
+            if isinstance(exc,WorkIdentityError):
+                self.window.store.reject_work_result(self.request_worldline,self.request_id,exc.reason)
+                self.failure(str(exc),autonomous_only=True)
+            elif isinstance(exc,VoiceContractError):
                 self.window.store.record_voice_rejection(self.request_worldline,self.kind,exc.notes,
-                    image_attached=self.request_image_attached,provider_model=response.get('model'),request_id=self.request_id)
+                    image_attached=self.request_image_attached,provider_model=response.get('model'),request_id=self.request_id,character_id=exc.character_id)
                 self.failure(str(exc),autonomous_only=True)
             elif isinstance(exc,PeerConversationError):
                 self.failure(str(exc), autonomous_only=True)

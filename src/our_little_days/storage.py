@@ -190,6 +190,26 @@ class SQLiteStore:
             self.connection.execute('INSERT INTO settings VALUES (?,?)', (marker, encode({'applied_at':taipei_now().isoformat()})))
         return safety
 
+    def apply_confirmed_haru_dialect_update(self):
+        """Apply only the user's confirmed dialect, once, with a safety backup."""
+        from .models import load_characters
+        marker='confirmed:haru-standard-japanese-2026-10-13'
+        if self.connection.execute('SELECT 1 FROM settings WHERE key=?',(marker,)).fetchone():
+            return None
+        current=next(c for c in self.load_characters() if c.id=='haru')
+        approved=next(c for c in load_characters() if c.id=='haru')
+        rules=dict(current.language_rules)
+        rules.update(dialect='standard',register=approved.language_rules['register'])
+        safety=None
+        if rules!=current.language_rules:
+            safety=self.path.parent/'backups'/f'before-haru-dialect-{taipei_now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}.sqlite3'
+            self.backup(safety)
+        with self.connection:
+            if safety:
+                self.connection.execute('UPDATE characters SET profile_json=?,updated_at=? WHERE id=?',(encode(asdict(replace(current,language_rules=rules))),taipei_now().isoformat(),'haru'))
+            self.connection.execute('INSERT INTO settings VALUES(?,?)',(marker,encode({'dialect':'standard'})))
+        return safety
+
     def apply_confirmed_shogo_address_update(self, *, force=False):
         """One approved update; preserve original text, custom traits and all AU relations."""
         marker = 'confirmed:shogo-address-register-2026-10-11'
@@ -243,19 +263,41 @@ class SQLiteStore:
         row = self.connection.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
         return json.loads(row[0]) if row else {}
 
-    def record_voice_rejection(self, worldline, kind, notes, *, image_attached, provider_model, request_id):
+    def record_voice_rejection(self, worldline, kind, notes, *, image_attached, provider_model, request_id, character_id='shogo'):
         """Local gate evidence; no rejected dialogue, screenshot or API key saved."""
         value={'completed_at':taipei_now().isoformat(),'kind':kind,'worldline':worldline,
             'provider_model':provider_model if isinstance(provider_model,str) and len(provider_model)<=256 else None,
             'image_attached':image_attached,'message_ids':[],'replied_character_ids':[],
-            'rejected':True,'attempted_character_ids':['shogo'],
-            'warnings':[{'character_id':'shogo','message_id':None,'notes':list(notes)}]}
+            'rejected':True,'attempted_character_ids':[character_id],
+            'warnings':[{'character_id':character_id,'message_id':None,'notes':list(notes)}]}
         with self.connection:
-            for key in ('ai-reply-diagnostic:'+worldline,'ai-reply-diagnostic:'+worldline+':shogo'):
+            for key in ('ai-reply-diagnostic:'+worldline,'ai-reply-diagnostic:'+worldline+':'+character_id):
                 self.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(key,encode(value)))
             result=self.api_result(worldline)
             if result.get('request_id')==request_id:
                 result['status']='voice_rejected'
+                self.connection.execute('UPDATE settings SET value=? WHERE key=?',(encode(result),'ai-api-result:'+worldline))
+
+    def work_focus(self, worldline):
+        row=self.connection.execute('SELECT value FROM settings WHERE key=?',('work-focus:'+worldline,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def remember_named_work(self, worldline, work, alias, message_id):
+        # Source is the user's actual saved message; not a guessed preference.
+        if message_id is None:
+            return
+        row=self.connection.execute("SELECT id FROM messages WHERE id=? AND worldline_id=? AND speaker_id='user' AND source_kind IN ('user','voice')",(message_id,worldline)).fetchone()
+        if not row:
+            raise StorageError('作品對照來源不是本世界線已保存的使用者訊息。')
+        value={'work_id':work['id'],'matched_alias':alias,'user_message_id':message_id}
+        with self.connection:
+            self.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('work-focus:'+worldline,encode(value)))
+
+    def reject_work_result(self, worldline, request_id, reason):
+        result=self.api_result(worldline)
+        if result.get('request_id')==request_id:
+            result.update(status='work_rejected',validation_issue=reason)
+            with self.connection:
                 self.connection.execute('UPDATE settings SET value=? WHERE key=?',(encode(result),'ai-api-result:'+worldline))
 
     def message_reply_notes(self, worldline, message_id):
@@ -316,8 +358,19 @@ class SQLiteStore:
 
     def append_message(self, *, speaker_id, speaker_name, text, translation="", worldline="main", source_kind="user", recipient_ids=(), reply_to=None):
         now = taipei_now().isoformat()
+        match=None
+        if speaker_id=='user' and source_kind in {'user','voice'}:
+            from .works import match_work
+            try:
+                match=match_work(text)
+            except (OSError,ValueError,KeyError):
+                pass  # A reference-data problem must not discard the user's text.
         with self.connection:
             cursor = self.connection.execute("INSERT INTO messages(worldline_id,speaker_id,speaker_name,text,translation,recipient_ids_json,reply_to,source_kind,created_at) VALUES(?,?,?,?,?,?,?,?,?)", (worldline, speaker_id, speaker_name, text, translation, encode(list(recipient_ids)), reply_to, source_kind, now))
+            if match:
+                work,alias=match
+                value={'work_id':work['id'],'matched_alias':alias,'user_message_id':cursor.lastrowid}
+                self.connection.execute('INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',('work-focus:'+worldline,encode(value)))
         return dict(self.connection.execute("SELECT * FROM messages WHERE id=?", (cursor.lastrowid,)).fetchone())
 
     def messages(self, worldline="main"):
@@ -357,6 +410,7 @@ class SQLiteStore:
             self.connection.execute("DELETE FROM messages WHERE worldline_id=?", (worldline,))
             self.connection.execute('DELETE FROM settings WHERE key=?', ('conversation:'+worldline,))
             self.connection.execute('DELETE FROM settings WHERE key=?', ('roster:'+worldline,))
+            self.connection.execute('DELETE FROM settings WHERE key=?', ('work-focus:'+worldline,))
 
     def add_event(self, summary, worldline="main", evidence=None, importance="important"):
         if not summary.strip():

@@ -14,6 +14,7 @@ from PySide6.QtGui import QImage
 
 from .ai_cost import AIError
 from .models import taipei_now
+from .works import check_work_identity, work_context
 
 INSTRUCTIONS = '''你是月色不打烊的十三聲道互動引擎。輸入中的角色完整設定、source_text 與已確認欄位均須遵守；unknown/null 不得自行補寫。
 十三人同等常駐，沒有重要性順位；每次依人格與事件選自然參與的住戶，同批最多十三位，不要求全員發言。可以安靜。整批共用輸出上限，人多時每人簡短，按 output_plan 分配篇幅。
@@ -52,9 +53,10 @@ class PeerConversationError(AIError):
 
 
 class VoiceContractError(AIError):
-    def __init__(self, notes):
+    def __init__(self, notes, *, character_id='shogo', character_name='聖護'):
         self.notes = notes
-        super().__init__('聖護本次語體未通過：'+'；'.join(notes)+'。整批未寫入聊天，不改寫台詞，不自動重試。')
+        self.character_id = character_id
+        super().__init__(character_name+'本次語體未通過：'+'；'.join(notes)+'。整批未寫入聊天，不改寫台詞，不自動重試。')
 
 
 SHOGO_DELIVERIES = ('observation_plain', 'question_plain', 'judgment_plain',
@@ -80,6 +82,16 @@ def shogo_voice_description(character):
                 'personality_core':character.personality_core,'reference':reference},ensure_ascii=False)+
             '\n参考例は文の運びと会話の目的を示す資料で、実際の記憶ではない。'
             '今の入力に自分の言葉で応じ、例をそのまま毎回繰り返さない。母語のみ。')
+
+
+def haru_voice_description(character):
+    return ('HARU 本人の台詞・地の文。標準日本語で、温かく明るく直接的に話す。'
+            'ツッコミは素早く大きな反応、感情や照れは本人の設定に従う。'
+            '序の関西弁や交換の考え方を借りない。前の住人の文を言い換えるのでなく、'
+            '自分の反応から自然に話す。標準語はよそよそしさや接客の敬語ではない。'
+            '引用した他人の方言と自分の話し方を区別する。'
+            '現在の本人設定：'+json.dumps({'user_address':character.user_address,'tone':character.tone,
+                'personality_core':character.personality_core,'language_rules':character.language_rules},ensure_ascii=False))
 
 
 def output_plan(max_tokens, kind):
@@ -111,12 +123,16 @@ def output_plan(max_tokens, kind):
             'target_total_output_tokens':min(1000,int(max_tokens*.6)), 'hard_total_output_tokens':max_tokens}
 
 
-def response_schema(characters, kind, selected, exposed_speakers, plan=None):
+def response_schema(characters, kind, selected, exposed_speakers, plan=None, named_work=None):
     """Constrain identifiers before generation, rather than rejecting paid guesses."""
     ids = [c.id for c in characters]
     if kind == 'reply_test' and selected not in ids:
         raise AIError('請先在「訊息氣泡測試」選擇一位住戶；尚未呼叫 API。')
     schema = deepcopy(SCHEMA)
+    if named_work and named_work['scope'] in {'current_user_named_work','current_work_followup'} and kind=='user_reply':
+        schema['properties']={'work_id':{'type':'string','enum':[named_work['work']['id']],
+            'description':'此 ID 來自本機對使用者這一輪原作品名的精確對照。先使用這個作品身分，再產生各角色回覆。不得改成近似名字或把已知作品當使用者自創。'},**schema['properties']}
+        schema['required']=list(schema['properties'])
     plan = plan or output_plan(2000,kind)
     schema['properties']['event_key']['maxLength'] = plan['max_event_key_characters']
     schema['properties']['summary']['maxLength'] = plan['max_summary_characters']
@@ -177,11 +193,16 @@ def response_schema(characters, kind, selected, exposed_speakers, plan=None):
         schema['properties']['summary']['enum'] = ['']
         schema['properties']['important']['enum'] = [False]
     shogo = next(c for c in characters if c.id=='shogo')
+    haru = next(c for c in characters if c.id=='haru')
     bind_shogo = kind not in {'screen_test'} and (kind!='reply_test' or selected=='shogo')
+    bind_haru = haru.language_rules.get('dialect')=='standard' and kind!='screen_test' and (kind!='reply_test' or selected=='haru')
+    if bind_shogo or bind_haru:
+        schema.setdefault('$defs', {})['other_resident_id']={'type':'string','enum':[i for i in ids if not (bind_shogo and i=='shogo') and not (bind_haru and i=='haru')]}
     if bind_shogo:
-        schema.setdefault('$defs', {})['other_resident_id']={'type':'string','enum':[i for i in ids if i!='shogo']}
         schema['$defs']['shogo_delivery']={'type':'string','enum':list(SHOGO_DELIVERIES),
             'description':'本人が今伝える目的を常体で選ぶ。観察・問い・判断・異論・からかい・愛情・日常のいずれか。目的に合う自分の文を作り、丁寧体を作って語尾だけ置き換える処理にしない。思考の説明は出力しない。'}
+    if bind_haru:
+        schema['$defs']['haru_dialect']={'type':'string','enum':['standard_japanese'],'description':'本人の標準日本語を選んでから、本人の反応と文を生成する。'}
     arrays=[]
     for tier,limits in enumerate(plan['participant_ranges']):
         branch=deepcopy(messages)
@@ -212,7 +233,23 @@ def response_schema(characters, kind, selected, exposed_speakers, plan=None):
                     bound.append(item)
                 bound.append(dedicated)
             else:
-                bound.append(item)
+                if not bind_haru:
+                    bound.append(item)
+            if bind_haru:
+                native_segments=deepcopy(segments)
+                native_segments['items']['properties']['text']['description']=haru_voice_description(haru)
+                ref_name='haru_segments_'+str(tier)
+                schema['$defs'][ref_name]=native_segments
+                own=deepcopy(item)
+                own['properties']['speaker_id']={'type':'string','enum':['haru']}
+                own_fields=own['properties']
+                own['properties']={**{k:v for k,v in own_fields.items() if k!='segments'},
+                    'dialect':{'$ref':'#/$defs/haru_dialect'},'segments':{'$ref':'#/$defs/'+ref_name}}
+                own['required']=list(own['properties'])
+                if not bind_shogo and kind!='reply_test':
+                    item['properties']['speaker_id']={'$ref':'#/$defs/other_resident_id'}
+                    bound.append(item)
+                bound.append(own)
         branch['items']={'anyOf':bound} if len(bound)>1 else bound[0]
         arrays.append(branch)
     schema['properties']['messages']={'anyOf':arrays} if len(arrays)>1 else arrays[0]
@@ -234,6 +271,12 @@ def reply_quality_notes(character, text, characters, *, image_attached=None):
     """Advisory checks on direct speech, not censorship or a Japanese parser."""
     direct = re.sub(r'「[^」]*」|『[^』]*』|“[^”]*”', '', text)
     notes = []
+    if character.id=='haru' and character.language_rules.get('dialect')=='standard':
+        # Avoid banning isolated や, な, へん or colloquial めっちゃ: these
+        # also occur in standard words and would cause excessive false alarms.
+        ending=r'(?:[。！？!?、，,\s♡…]|$)'
+        if re.search(r'ほんま|せや(?:な|ね|で)?|やねん|やろ'+ending+r'|[ぁ-ゖ一-龯]や(?:な|で)'+ending+r'|なんや'+ending+r'|(?:せえ|でき|分から|わから|知ら|しら|見え|行か)へん',direct):
+            notes.append('HARU 出現已識別的關西腔；目前設定為標準日文，不沿用序的方言')
     if character.id=='shogo':
         other_addresses = {c.user_address for c in characters if c.id!='shogo' and c.user_address and c.user_address!=character.user_address}
         for address in sorted(other_addresses):
@@ -259,10 +302,15 @@ def reply_quality_notes(character, text, characters, *, image_attached=None):
 def check_current_voice(turn, characters):
     """Gate a new API turn; never repair text or reevaluate stored old chats."""
     shogo=next(c for c in characters if c.id=='shogo')
-    if not shogo.language.startswith('ja') or '不使用敬語' not in (shogo.language_rules or {}).get('register',''):
-        return
+    haru=next(c for c in characters if c.id=='haru')
     for message in turn['messages']:
-        if message['speaker_id']!='shogo':
+        if message['speaker_id']=='haru' and haru.language_rules.get('dialect')=='standard':
+            violations=reply_quality_notes(haru,'\n'.join(s['text'] for s in message['segments']),characters)
+            if message.get('dialect')!='standard_japanese':
+                violations.append('未提供 HARU 本人的標準日文方言標記')
+            if violations:
+                raise VoiceContractError(violations,character_id='haru',character_name='HARU')
+        if message['speaker_id']!='shogo' or not shogo.language.startswith('ja') or '不使用敬語' not in shogo.language_rules.get('register',''):
             continue
         notes=reply_quality_notes(shogo,'\n'.join(s['text'] for s in message['segments']),characters)
         violations=[n for n in notes if '敬語句尾' in n or '直接使用其他角色的稱呼' in n]
@@ -291,12 +339,19 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
                     if row['source_kind']=='ai' and row['speaker_id']!='user'
                     and any(r!='user' and r!=row['speaker_id'] for r in json.loads(row['recipient_ids_json']))][-8:]
     by_id = {c.id:c for c in characters}
+    if kind=='user_reply' and current_input is None:
+        latest=next((r for r in reversed(recent) if r['speaker_id']=='user' and r['source_kind'] in {'user','voice'}),None)
+        if latest:
+            current_input={'kind':'typed_text' if latest['source_kind']=='user' else 'voice_transcript','text':latest['text'],'saved':True}
+    named_work=work_context(store,worldline,current_input)
     for row in [*recent, *ongoing['anchor_messages']]:
         if row['source_kind']=='ai' and row['speaker_id'] in by_id:
             native = '\n'.join(line for line in row['text'].splitlines() if not line.strip().startswith(('（','(')))
             notes = reply_quality_notes(by_id[row['speaker_id']], native, characters)
             if notes:
                 row['voice_note'] = {'do_not_imitate_voice':True, 'advisory':notes, 'preserve_event_and_reply_chain':True}
+            if named_work and named_work['scope']=='current_user_named_work':
+                row['work_note']={'not_current_work_evidence':True,'instruction':'歷史 AI 內容不能覆蓋本輪使用者明確作品對照；不沿用較早的錯誤作品或猜測劇情','preserve_event_and_reply_chain':True}
     # Send every saved profile in full, including original source_text. No cost truncation.
     context = {'task': kind, 'active_worldline': worldline, 'apartment': apartment,
                'global_original_rules': files('our_little_days').joinpath('data/global_character_rules.txt').read_text(encoding='utf-8'),
@@ -309,6 +364,7 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
                'recent_chat': recent,
                'requested_character': selected,
                'ongoing_conversation': ongoing,
+               'work_context':named_work,
                'resident_conversation': {'active':resident_conversation, 'recent_peer_threads':peer_threads,
                    'purpose':'住戶之間自行開話題或接續討論；舊使用者訊息是背景，不是新的提問' if resident_conversation else '優先回應使用者，之後可住戶互相接話'},
                'current_user_input': current_input,
@@ -333,7 +389,7 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
         instructions += '\n本次是住戶之間的自主對話，不是回覆舊使用者訊息。recipient_ids 只填其他住戶，不填 user 或自己；第一位可直接向尚未發言的住戶開話題，不需等使用者介紹話題或點名。其他人依人格接話、吐槽、反駁或補充；不固定主持人，不要求十三位全出場。已有 recent_peer_threads 時可回接其真實 ID 或自然延伸內容；沒有時可從保存的興趣、新畫面事件或未完討論選題，不捏造已發生事件，不反覆詢問使用者今天想做什麼。可空批次保持安靜；單人先開話題或延遲回嘴也可以，但發言仍要有其他住戶為對象。'
     exposed_speakers = {row['id']: row['speaker_id'] for row in [*recent, *ongoing['anchor_messages']]}
     plan = output_plan(config.max_output_tokens,kind)
-    schema = response_schema(characters, kind, selected, exposed_speakers,plan)
+    schema = response_schema(characters, kind, selected, exposed_speakers,plan,named_work)
     review = '生成前逐則核對 speaker_id 自己的稱呼、語氣與完整人格；不要讓前一位角色或歷史錯誤代替目前設定。每段 text 只含母語，translation 只翻譯一次；不沿用歷史的重複翻譯。已讀只標記本輪明確安排閱讀的住戶，不因人格齊全而全選。核對過程不輸出，只回傳指定 JSON。'
     shogo = next(c for c in characters if c.id == 'shogo')
     review += '\n聖護目前保存的稱呼與行為：' + json.dumps({'user_address': shogo.user_address, 'tone': shogo.tone, 'self_reference': shogo.self_reference, 'language_rules': shogo.language_rules, 'behavior': list(shogo.behavior)}, ensure_ascii=False)
@@ -347,12 +403,17 @@ def build_payload(config, characters, store, worldline, kind, image=None, select
     review += '\n聖護は自分の視点・判断と今の会話の目的を保つ。schema 内の本人専用 text の説明と保存された対話参考を参照する。口調、文の運び、考え方を一緒に選び、客服の敬語だけを外した文章にはしない。画面の内容を見ただけなら、誰かの気持ちや行動の理由を事実として断定しない。'
     if kind!='screen_test':
         review += '\n聖護専用の生成順序：自分が何を伝えるかを delivery で選び、その目的から最初から常体の文を作る。自分の判断なら「だ」「だろうね」、確認するなら「ということかな」「君はどう思う？」など、目的に合う自然な常体を使う。これらは文法の選択肢で、毎回の固定台詞ではない。先に丁寧体を書いて語尾を削るのではなく、自分の観察・関心から文を組み立てる。ユーザーが事実を訂正した時は、その訂正を受けて自分の考えを続ける；接客の確認係にならない。過去の AI 発言は出来事の資料であり、voice_note のある文は話し方の見本に使わない。発言前に自分の本文と地の文を常体で読み直し、丁寧体が残っていたら同じ出力内で全文と翻訳を作り直してから完成させる。選択ラベル以外の思考過程は出力しない。'
+    haru=next(c for c in characters if c.id=='haru')
+    if haru.language_rules.get('dialect')=='standard':
+        review+='\nHARU 本人は標準日本語で話す。本人の明るさ、温かさ、直接的な感情や速いツッコミを保ち、序の方言や考え方を引き継がない。本人の dialect と専用 text 欄を選んでから、最初から本人の文を作る。方言を機械的に書き換えない。'
+    review+='\n作品辨識：以本輪使用者提供的原名稱為準，不替換成名字相似的知名作品。work_context 是本機作品參考，與角色人格／互動記憶分開；current_user_named_work 時用其中中日名稱、作者與類型承接當下輸入，不重新把已辨識名稱當新詞、使用者自創或請使用者再報一次名稱。previous_user_named_work 只表示先前提過的作品，不能據此聲稱這次圖片就是該作。沒有可信對照或不確定劇情／改編近況時坦白不確定，詢問所需資訊，不猜作者、媒介、上映狀態或情節。可以用確信對應同一作品的知識，但不能用近似作品的悲傷或浪漫印象冒充劇情。'
     request_input = current_input
     if kind=='user_reply' and request_input is None:
         latest = next((r for r in reversed(recent) if r['speaker_id']=='user' and r['source_kind'] in {'user','voice'}), None)
         request_input = {'kind':'typed_text' if latest['source_kind']=='user' else 'voice_transcript','text':latest['text'],'saved':True} if latest else None
     focus = {'task':kind, 'active_worldline':worldline, 'current_user_input':request_input if kind=='user_reply' else None,
              'test_prompt':context['test_prompt'], 'visual_evidence':context['visual_evidence'], 'output_plan':plan,
+             'work_context':named_work,
              'conversation_mode':'resident_to_resident' if resident_conversation else 'respond_to_user',
              'instruction':('讓住戶自行選擇話題、直接對其他住戶發言並互相接話；recipient_ids 只填其他住戶。延續 recent_peer_threads 的真實對話或從既有興趣／新事件開題，舊使用者訊息只作背景，不再輪流回答舊問題。不要以使用者當收尾提問對象。可自然安靜，不固定主持人或全員出場。' if resident_conversation else '回應這一輪的任務與目前輸入；先前聊天是保留的背景，不重演先前錯誤回答。若多人自然參與，允許後續住戶對彼此的觀點接話，避免每人都重複對使用者說同一件事。')+'用完整設定與目前有效語體表生成指定 JSON。'}
     payload = {'model': config.model, 'messages': [{'role': 'system', 'content': instructions}, {'role': 'user', 'content': content}, {'role': 'system', 'content': review}, {'role':'user','content':json.dumps(focus,ensure_ascii=False)}],
@@ -387,7 +448,7 @@ def validate_turn(response, characters, kind, selected=None, store=None, worldli
             invalid('模型未正常完成回覆')
         value = json.loads(choice['message']['content'])
         # Older retained responses may lack read decisions; never infer them.
-        if set(value) not in (set(SCHEMA['properties']), set(SCHEMA['properties'])-{'read_character_ids'}) or type(value['meaningful']) is not bool or type(value['important']) is not bool:
+        if set(value)-{'work_id'} not in (set(SCHEMA['properties']), set(SCHEMA['properties'])-{'read_character_ids'}) or ('work_id' in value and not isinstance(value['work_id'],str)) or type(value['meaningful']) is not bool or type(value['important']) is not bool:
             invalid('最外層欄位或資料型別不符合格式')
         if not isinstance(value['event_key'], str) or not isinstance(value['summary'], str) or len(value['event_key']) > 200 or len(value['summary']) > 3000:
             invalid('事件識別或摘要欄位不符合格式')
@@ -450,12 +511,13 @@ def event_seen(store, worldline, key):
     return any(json.loads(e['evidence_json']).get('ai_event_key', '').strip().casefold() == normalized for e in store.events(worldline))
 
 
-def save_turn(store, worldline, turn, characters, kind, user_message_id="latest", *, quiet_cooldown=6, image_attached=None, response_model=None):
+def save_turn(store, worldline, turn, characters, kind, user_message_id="latest", *, quiet_cooldown=6, image_attached=None, response_model=None, named_work=None):
     if kind == 'screen_test':
         return []
     if kind == 'screen_event' and (not turn['meaningful'] or event_seen(store, worldline, turn['event_key'])):
         return []
     check_current_voice(turn,characters)
+    check_work_identity(turn,named_work)
     ids = {c.id: c for c in characters}
     records = []
     # Atomic turn: nested append_message() commits are avoided by direct SQL here.

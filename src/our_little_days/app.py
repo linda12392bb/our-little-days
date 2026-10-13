@@ -41,6 +41,7 @@ def main():
         store.apply_confirmed_order_speech_update()
         store.apply_confirmed_shogo_address_update()
         store.apply_confirmed_shogo_dialogue_reference()
+        store.apply_confirmed_haru_dialect_update()
         characters = store.load_characters()
     except (OSError, ValueError, TypeError, KeyError, StorageError, sqlite3.DatabaseError) as exc:
         if store:

@@ -107,7 +107,7 @@ def main():
     if python_license.is_file():
         shutil.copyfile(python_license, folder / "LICENSES/Python-LICENSE.txt")
     info = {
-        "version": "0.4.11",
+        "version": "0.4.12",
         "runtime_source_sha256": source_hashes,
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
         "build_environment": args.build_environment,
@@ -119,13 +119,13 @@ def main():
         "whisper_runtime": speech_manifest,
         "windows_manual_acceptance": "not_run",
         "signing": "unsigned",
-        "scope": "Shogo chooses a plain delivery purpose before native text in his own structured-output branch. Removed polite negative example from generation guidance; current-turn pre-save gate rejects known direct keigo or other nicknames without rewriting. Settled rejection diagnostics persist separately; queued user input and text AI survive, no paid retry. All 13 unchanged profiles, full original sources, worldlines, single-request peer continuity, 2000 shared output cap and shared budget preserved. Native Windows/live persona quality not verified.",
+        "scope": "HARU standard-Japanese rule migrates once with safety backup; own generated dialect branch and known Kansai pre-save guard keep him distinct from Order. Offline exact work aliases resolve the user title to Japanese manga identity; saved worldline focus survives restarts, supports follow-up, and known wrong-work/invented-title replies are rejected without rewriting or retry. Full 13 personas and original sources preserved; only HARU approved language rules change. One API per batch, shared 2000 output cap and budgets remain; no external lookup. Native Windows/live quality pending.",
     }
     (folder / "BUILD_INFO.json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     shutil.copyfile(report_file, folder / "PACKAGE_CHECK.json")
     (folder / "開啟安裝說明.cmd").write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nnotepad.exe START_HERE.txt\r\n')
     (folder / "開啟資料資料夾.cmd").write_bytes(b'@echo off\r\nif not exist "%LOCALAPPDATA%\\OurLittleDays" mkdir "%LOCALAPPDATA%\\OurLittleDays"\r\nstart "" explorer.exe "%LOCALAPPDATA%\\OurLittleDays"\r\n')
-    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.11-preview.zip"
+    archive = artifacts / "OurLittleDays-Windows-x64-Companion-0.4.12-preview.zip"
     with ZipFile(archive, "w", ZIP_DEFLATED) as output:
         for path in sorted(folder.rglob("*")):
             if path.is_file():

@@ -85,6 +85,18 @@
         }
       },
       "self_reference": "僕"
+    },
+    "haru": {
+      "language_rules": {
+        "speech_language": "ja",
+        "narration_language": "ja",
+        "strict_language": true,
+        "register": "標準日文；溫柔、明亮、直接；不使用關西腔，不沿用序的方言",
+        "translation_language": "zh-TW",
+        "translate_speech_and_narration": true,
+        "translation_preserves_personality": true,
+        "dialect": "standard"
+      }
     }
   },
   "authorized_changed_fields": {
@@ -104,6 +116,9 @@
       "tone",
       "language_rules",
       "self_reference"
+    ],
+    "haru": [
+      "language_rules"
     ]
   },
   "profiles": {

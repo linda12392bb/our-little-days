@@ -101,6 +101,7 @@ def _check_manual_buttons(window):
                                           'segments':[{'kind':'speech','text':native,'translation':'在這裡。' if character.translation_required else ''}]})
             for message in value['messages']:
                 if message['speaker_id']=='shogo':message['delivery']='everyday_plain'
+                if message['speaker_id']=='haru':message['dialect']='standard_japanese'
             usage={'prompt_tokens':15054,'completion_tokens':1500}
         if kind=='user_reply' and len(calls)==7:
             return {'id':'offline-output-limit','model':'gpt-4.1-mini-offline-test','usage':{'prompt_tokens':15054,'completion_tokens':2000},
@@ -321,6 +322,67 @@ def _check_autonomous_peer_router(window):
         c.pause()
 
 
+def _check_haru_and_work_buttons(window):
+    """Shipped migration, exact local title data, and real send-button routing."""
+    import time
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QMessageBox
+    from . import ai_ui
+    c=window.ai
+    originals=(ai_ui.request_api,QMessageBox.warning,QMessageBox.information,c.keys.read,c.keys.exists,c.config)
+    profiles=window.store.load_characters();haru=next(p for p in profiles if p.id=='haru')
+    old_rules={**haru.language_rules,'register':'依角色語氣'};old_rules.pop('dialect')
+    window.store.save_character(replace(haru,language_rules=old_rules))
+    safety=window.store.apply_confirmed_haru_dialect_update()
+    assert safety and safety.is_file() and window.store.apply_confirmed_haru_dialect_update() is None
+    assert window.store.load_characters()==profiles
+    baseline=c.ledger.totals()['month']['requests'];calls=[]
+    def fake(key,payload,cancelled):
+        calls.append(payload)
+        context=json.loads(payload['messages'][1]['content'][0]['text'])
+        work=context['work_context']['work']
+        assert work['title_ja']=='ホタルの嫁入り' and work['medium']=='manga'
+        assert work['author']=='橘オレコ' and len(context['characters'])==13
+        assert payload['max_completion_tokens']==2000 and len(payload['messages'][1]['content'])==1
+        assert payload['response_format']['json_schema']['schema']['properties']['work_id']['enum']==['hotaru-no-yomeiri']
+        native=['「ホタルの嫁入り」のことだね！','楽しみやな！','「火垂るの墓」は重い話だね。','作者は橘オレコだよ。'][len(calls)-1]
+        if len(calls)==4:
+            assert context['work_context']['scope']=='current_work_followup'
+        value={'meaningful':False,'event_key':'','summary':'','important':False,'read_character_ids':[],
+            'work_id':'hotaru-no-yomeiri','messages':[{'speaker_id':'haru','recipient_ids':['user'],
+            'reply_to_index':None,'reply_to_message_id':None,'dialect':'standard_japanese',
+            'segments':[{'kind':'speech','text':native,'translation':'本機測試翻譯'}]}]}
+        return {'id':'offline-haru-work-probe','model':'mock-mini','usage':{'prompt_tokens':100,'completion_tokens':120},
+            'choices':[{'finish_reason':'stop','message':{'content':json.dumps(value)}}]}
+    try:
+        ai_ui.request_api=fake
+        QMessageBox.warning=QMessageBox.information=lambda *a:None
+        c.keys.read=lambda:'mock-only';c.keys.exists=lambda:True
+        c.config=replace(c.config,transmission_approved=True)
+        c.enable(True)
+        for index,text in enumerate(['螢火蟲的出嫁','是螢火蟲的出嫁','螢火蟲的出嫁！','這部的作者呢？'],1):
+            before=len(window.store.messages())
+            window.chat_input.setPlainText(text);window.send_message()
+            deadline=time.monotonic()+10
+            while c.worker is not None and time.monotonic()<deadline:QTest.qWait(10)
+            assert c.worker is None and len(calls)==index and c.enabled
+            result=window.store.api_result(window.worldline)
+            if index in (2,3):
+                assert len(window.store.messages())==before+1
+                assert result['status']==('voice_rejected' if index==2 else 'work_rejected')
+                if index==2:
+                    assert window.store.reply_diagnostic(window.worldline,'haru')['attempted_character_ids']==['haru']
+            else:
+                assert result['status']=='accepted' and len(window.store.messages())==before+2
+        assert c.ledger.totals()['month']['requests']==baseline+4
+        assert c.ledger.totals()['month']['uncertain_twd']==0
+        assert window.store.work_focus(window.worldline)['work_id']=='hotaru-no-yomeiri'
+        assert window.store.work_focus('glasshouse') is None and window.store.load_characters()==profiles
+    finally:
+        (ai_ui.request_api,QMessageBox.warning,QMessageBox.information,c.keys.read,c.keys.exists,c.config)=originals
+        c.pause()
+
+
 def check_package(speech_test_dir=None):
     from PySide6.QtWidgets import QApplication
     from .capture import DemoBackend
@@ -457,6 +519,9 @@ def check_package(speech_test_dir=None):
             assert not store.conversation_context('glasshouse')['anchor_messages']
             _check_manual_buttons(window)
             _check_autonomous_peer_router(window)
+            _check_haru_and_work_buttons(window)
+            checks.append('frozen HARU standard-Japanese migration changes approved dialect/register only once with safety backup; all original personas and source retained')
+            checks.append('frozen real send button resolves Chinese manga title to local Japanese identity in one mock request, rejects HARU Kansai and wrong movie without chat writes or retry, settles all costs and preserves text AI; persisted worldline focus answers follow-up author question')
             checks.append('frozen actual quiet scheduler opens light-to-order topic, later order replies to historical light ID and REO joins; typed user interrupts idle routing; all personas/memory preserved, one mock request per batch, no network')
             checks.append('frozen manual reply button works while AI paused; strict selected ID schema, safe failure dialog with settled usage and success dialog verified with mock provider, no network or retry')
             checks.append('frozen quiet_test button creates light-to-order-to-reo peer replies in one mock request; null model indexes resolved locally to prior explicit recipients and persisted; scheduler remains OFF')
